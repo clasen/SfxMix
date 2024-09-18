@@ -44,21 +44,21 @@ npm install sfxmix
 ```javascript
 const SfxMix = require('sfxmix');
 
-const processor = new SfxMix();
+const sfx = new SfxMix();
 
-processor
-  .add('intro.mp3')
-  .silence(2000) // 2 seconds of silence
-  .add('main.mp3')
-  .filter('normalize', { i: -14, tp: -2.0, lra: 7.0 })
-  .mix('background.mp3', { duration: 'first' })
-  .save('final_output.mp3')
-  .then(() => {
-    console.log('Audio processing completed successfully! 🎉');
-  })
-  .catch((err) => {
-    console.error('Error during audio processing:', err);
-  });
+sfx
+    .add('intro.mp3')
+    .silence(2000) // 2 seconds of silence
+    .add('main.mp3')
+    .filter('normalize', { i: -14, tp: -2.0, lra: 7.0 })
+    .mix('background.mp3', { duration: 'first' })
+    .save('final_output.mp3')
+    .then(() => {
+        console.log('Audio exported to final_output.mp3 🎉');
+    })
+    .catch((err) => {
+        console.error('Error during audio processing:', err);
+    });
 ```
 ---
 
@@ -67,53 +67,53 @@ processor
 ### 1. Concatenate and Mix with Background Music
 
 ```javascript
-processor
-  .add('intro.mp3')
-  .add('chapter1.mp3')
-  .add('chapter2.mp3')
-  .mix('background_music.mp3', { duration: 'first' })
-  .save('audiobook_with_music.mp3');
+sfx
+    .add('intro.mp3')
+    .add('chapter1.mp3')
+    .add('chapter2.mp3')
+    .mix('background_music.mp3', { duration: 'first' })
+    .save('audiobook_with_music.mp3');
 ```
 
 ### 2. Apply Multiple Filters
 
 ```javascript
-processor
-  .add('voiceover.mp3')
-  .filter('normalize', { i: -14 })
-  .filter('equalizer', { frequency: 3000, width: 1000, gain: 5 })
-  .save('processed_voiceover.mp3');
+sfx
+    .add('voiceover.mp3')
+    .filter('normalize', { i: -14 })
+    .filter('equalizer', { frequency: 3000, width: 1000, gain: 5 })
+    .save('processed_voiceover.mp3');
 ```
 
 ### 3. Insert Silence Between Tracks
 
 ```javascript
-processor
-  .add('track1.mp3')
-  .silence(2000)
-  .add('track2.mp3')
-  .silence(2000)
-  .add('track3.mp3')
-  .save('album_with_silence.mp3');
+sfx
+    .add('track1.mp3')
+    .silence(2000)
+    .add('track2.mp3')
+    .silence(2000)
+    .add('track3.mp3')
+    .save('album_with_silence.mp3');
 ```
 
 ### 4. Apply Telephone Effect
 
 ```javascript
-processor
-  .add('dialogue.mp3')
-  .filter('telephone')
-  .save('telephone_effect.mp3');
+sfx
+    .add('dialogue.mp3')
+    .filter('telephone')
+    .save('telephone_effect.mp3');
 ```
 
 ### 5. Adjust Volume and Add Echo
 
 ```javascript
-processor
-  .add('announcement.mp3')
-  .filter('volume', { volume: 1.5 })
-  .filter('echo', { delay: 750, decay: 0.7 })
-  .save('enhanced_announcement.mp3');
+sfx
+    .add('announcement.mp3')
+    .filter('volume', { volume: 1.5 })
+    .filter('echo', { delay: 750, decay: 0.7 })
+    .save('enhanced_announcement.mp3');
 ```
 
 ---
@@ -134,7 +134,7 @@ processor
 
 ### `add(input)`
 
-Adds an audio file to the processor for concatenation.
+Adds an audio file to the sfx for concatenation.
 
 - **Parameters:**
   - `input` (string): Path to the audio file.
@@ -143,7 +143,7 @@ Adds an audio file to the processor for concatenation.
 **Example:**
 
 ```javascript
-processor.add('part1.mp3').add('part2.mp3');
+sfx.add('part1.mp3').add('part2.mp3');
 ```
 
 ---
@@ -161,7 +161,7 @@ Mixes an audio file with the current audio.
 **Example:**
 
 ```javascript
-processor.mix('sound_effect.wav', { duration: 'first' });
+sfx.mix('sound_effect.wav', { duration: 'first' });
 ```
 
 ---
@@ -177,7 +177,7 @@ Inserts silence into the audio sequence.
 **Example:**
 
 ```javascript
-processor.silence(3000); // Inserts 3 seconds of silence
+sfx.silence(3000); // Inserts 3 seconds of silence
 ```
 
 ---
@@ -215,7 +215,7 @@ Processes the audio according to the specified actions and saves the result.
 **Example:**
 
 ```javascript
-processor.save('output.mp3');
+sfx.save('output.mp3');
 ```
 
 ---
@@ -234,7 +234,7 @@ Normalizes audio loudness to a specified target using the EBU R128 standard.
 **Example:**
 
 ```javascript
-processor.filter('normalize', { i: -14, tp: -2.0, lra: 7.0 });
+sfx.filter('normalize', { i: -14, tp: -2.0, lra: 7.0 });
 ```
 
 ---
@@ -250,7 +250,7 @@ Applies a telephone effect by applying high-pass and low-pass filters.
 **Example:**
 
 ```javascript
-processor.filter('telephone', { lowFreq: 400, highFreq: 3000 });
+sfx.filter('telephone', { lowFreq: 400, highFreq: 3000 });
 ```
 
 ---
@@ -266,7 +266,7 @@ Adds an echo effect to the audio.
 **Example:**
 
 ```javascript
-processor.filter('echo', { delay: 1000, decay: 0.6 });
+sfx.filter('echo', { delay: 1000, decay: 0.6 });
 ```
 
 ---
@@ -280,7 +280,7 @@ Applies a reverb effect to the audio.
 **Example:**
 
 ```javascript
-processor.filter('reverb');
+sfx.filter('reverb');
 ```
 
 ---
@@ -295,7 +295,7 @@ Applies a high-pass filter to remove frequencies below the cutoff.
 **Example:**
 
 ```javascript
-processor.filter('highpass', { frequency: 1000 });
+sfx.filter('highpass', { frequency: 1000 });
 ```
 
 ---
@@ -310,7 +310,7 @@ Applies a low-pass filter to remove frequencies above the cutoff.
 **Example:**
 
 ```javascript
-processor.filter('lowpass', { frequency: 2000 });
+sfx.filter('lowpass', { frequency: 2000 });
 ```
 
 ---
@@ -325,7 +325,7 @@ Adjusts the audio volume.
 **Example:**
 
 ```javascript
-processor.filter('volume', { volume: 0.8 });
+sfx.filter('volume', { volume: 0.8 });
 ```
 
 ---
@@ -342,7 +342,7 @@ Applies an equalizer effect to adjust specific frequencies.
 **Example:**
 
 ```javascript
-processor.filter('equalizer', { frequency: 1000, width: 200, gain: -10 });
+sfx.filter('equalizer', { frequency: 1000, width: 200, gain: -10 });
 ```
 
 ---
