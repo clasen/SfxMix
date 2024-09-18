@@ -1,5 +1,6 @@
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 
 class SfxMix {
     constructor() {
@@ -40,7 +41,7 @@ class SfxMix {
                         if (this.currentFile == null) {
                             this.currentFile = action.input;
                         } else {
-                            const tempFile = `temp_concat_${Date.now()}.mp3`;
+                            const tempFile = `temp_concat_${uuidv4()}.mp3`;
                             await concatenateAudioFiles([this.currentFile, action.input], tempFile);
                             if (isTempFile(this.currentFile)) {
                                 fs.unlinkSync(this.currentFile);
@@ -52,7 +53,7 @@ class SfxMix {
                         if (this.currentFile == null) {
                             throw new Error('No audio to mix with. Add or concatenate audio before mixing.');
                         }
-                        const tempFile = `temp_mix_${Date.now()}.mp3`;
+                        const tempFile = `temp_mix_${uuidv4()}.mp3`;
                         await mixAudioFiles(this.currentFile, action.input, tempFile, action.options);
                         if (isTempFile(this.currentFile)) {
                             fs.unlinkSync(this.currentFile);
@@ -60,12 +61,12 @@ class SfxMix {
                         this.currentFile = tempFile;
                     } else if (action.type === 'silence') {
                         // Existing silence logic
-                        const tempSilenceFile = `temp_silence_${Date.now()}.mp3`;
+                        const tempSilenceFile = `temp_silence_${uuidv4()}.mp3`;
                         await generateSilence(action.duration, tempSilenceFile);
                         if (this.currentFile == null) {
                             this.currentFile = tempSilenceFile;
                         } else {
-                            const tempFile = `temp_concat_${Date.now()}.mp3`;
+                            const tempFile = `temp_concat_${uuidv4()}.mp3`;
                             await concatenateAudioFiles([this.currentFile, tempSilenceFile], tempFile);
                             if (isTempFile(this.currentFile)) {
                                 fs.unlinkSync(this.currentFile);
@@ -78,7 +79,7 @@ class SfxMix {
                         if (this.currentFile == null) {
                             throw new Error('No audio to apply filter to. Add audio before applying filters.');
                         }
-                        const tempFile = `temp_filter_${Date.now()}.mp3`;
+                        const tempFile = `temp_filter_${uuidv4()}.mp3`;
                         await applyFilter(this.currentFile, action.filterName, action.options, tempFile);
                         if (isTempFile(this.currentFile)) {
                             fs.unlinkSync(this.currentFile);
@@ -88,11 +89,21 @@ class SfxMix {
                 }
                 // Finalize output
                 fs.renameSync(this.currentFile, output);
+
+                // Reset internal state
+                this.reset();
+
                 resolve(output);
             } catch (err) {
                 reject(err);
             }
         });
+    }
+
+    reset() {
+        this.actions = [];
+        this.currentFile = null;
+        return this;
     }
 }
 
@@ -110,7 +121,7 @@ function isTempFile(filename) {
 function concatenateAudioFiles(inputFiles, outputFile) {
     return new Promise((resolve, reject) => {
         const concatList = inputFiles.map(file => `file '${file}'`).join('\n');
-        const concatFile = `concat_${Date.now()}.txt`;
+        const concatFile = `concat_${uuidv4()}.txt`;
         fs.writeFileSync(concatFile, concatList);
 
         ffmpeg()
