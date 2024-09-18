@@ -370,7 +370,7 @@ Contributions are welcome! Feel free to submit a pull request or open an issue o
 
 ## 💬 Support
 
-If you encounter any issues or have questions, please open an issue on the [GitHub repository](https://github.com/yourusername/SfxMix/issues).
+If you encounter any issues or have questions, please open an issue on the [GitHub repository](https://github.com/clasen/SfxMix/issues).
 
 ---
 
