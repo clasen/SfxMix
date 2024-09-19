@@ -482,7 +482,7 @@ If you encounter any issues or have questions, please open an issue on the [GitH
 
 ## 🤝 Contributing
 
-Contributions are welcome! If you find any issues or have suggestions for improvement, please open an issue or submit a pull request on the [GitHub repository](https://github.com/clasen/ModelMix).
+Contributions are welcome! If you find any issues or have suggestions for improvement, please open an issue or submit a pull request on the [GitHub repository](https://github.com/clasen/SfxMix).
 
 ---
 
