@@ -232,7 +232,7 @@ sfx.save('output.mp3');
 Normalizes audio loudness to a specified target using the EBU R128 standard.
 
 - **Options:**
-  - `tp` (number): Maximum true peak level in dBTP (default: `-1.5`).
+  - `tp` (number): Maximum true peak level in dBTP (default: `-3`).
   - `i` (number): Target integrated loudness in LUFS (default: `-16`).
   - `lra` (number): Loudness range in LU (default: `11`).
 

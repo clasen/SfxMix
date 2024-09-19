@@ -209,8 +209,8 @@ function getFilterChain(filterName, options) {
     switch (filterName) {
         case 'normalize':
             // Normalize audio using loudnorm filter with parameters
+            const tp = options.tp || -3;
             const i = options.i || -16;
-            const tp = options.tp || -1.5;
             const lra = options.lra || 11;
             return `loudnorm=I=${i}:TP=${tp}:LRA=${lra}:print_format=none`;
 
