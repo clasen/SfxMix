@@ -201,6 +201,11 @@ Applies an audio filter to the current audio.
 - [`lowpass`](#filterlowpass)
 - [`volume`](#filtervolume)
 - [`equalizer`](#filterequalizer)
+- [`compressor`](#filtercompressor)
+- [`flanger`](#filterflanger)
+- [`pitch`](#filterpitch)
+- [`tremolo`](#filtertremolo)
+- [`phaser`](#filterphaser)
 
 ---
 
@@ -245,7 +250,7 @@ Applies a telephone effect by applying high-pass and low-pass filters.
 
 - **Options:**
   - `lowFreq` (number): High-pass filter cutoff frequency in Hz (default: `300`).
-  - `highFreq` (number): Low-pass filter cutoff frequency in Hz (default: `3400`).
+  - `highFreq` (number): Low-pass filter cutoff frequency in Hz (default: `3000`).
 
 **Example:**
 
@@ -275,7 +280,15 @@ sfx.filter('echo', { delay: 1000, decay: 0.6 });
 
 Applies a reverb effect to the audio.
 
-- **Options:** None
+- **Options:**
+  - `room_size` (number): Size of the room (default: `50`).
+  - `reverberance` (number): Amount of reverberation (default: `50`).
+  - `damping` (number): Damping factor (default: `50`).
+  - `hf_damping` (number): High-frequency damping (default: `50`).
+  - `stereo_depth` (number): Stereo depth (default: `0`).
+  - `pre_delay` (number): Pre-delay time in milliseconds (default: `0`).
+  - `wet_gain` (number): Gain of the wet signal (default: `0`).
+  - `wet_only` (number): If set to `1`, only the wet signal is output (default: `0`).
 
 **Example:**
 
@@ -347,24 +360,103 @@ sfx.filter('equalizer', { frequency: 1000, width: 200, gain: -10 });
 
 ---
 
+### Filter: `compressor`
+
+Applies a dynamic range compressor to the audio.
+
+- **Options:**
+  - `threshold` (number): Threshold level in dB (default: `-18`).
+  - `ratio` (number): Compression ratio (default: `2`).
+  - `attack` (number): Attack time in milliseconds (default: `20`).
+  - `release` (number): Release time in milliseconds (default: `250`).
+
+**Example:**
+
+```javascript
+sfx.filter('compressor', { threshold: -20, ratio: 4, attack: 15, release: 300 });
+```
+
+---
+
+### Filter: `flanger`
+
+Applies a flanger effect to the audio.
+
+- **Options:**
+  - `delay` (number): Base delay in milliseconds (default: `0`).
+  - `depth` (number): Oscillation depth (default: `2`).
+  - `regen` (number): Regeneration (feedback) (default: `0`).
+  - `width` (number): Percentage of delayed signal mixed (default: `71`).
+  - `speed` (number): Oscillation speed in Hz (default: `0.5`).
+  - `shape` (string): Oscillator wave shape (`'sine'` or `'triangular'`) (default: `'sine'`).
+  - `phase` (number): Percentage of offset for second delayed signal (default: `25`).
+  - `interp` (string): Delay line interpolation (`'linear'` or `'quadratic'`) (default: `'linear'`).
+
+**Example:**
+
+```javascript
+sfx.filter('flanger', { delay: 5, depth: 3, speed: 0.8 });
+```
+
+---
+
+### Filter: `pitch`
+
+Shifts the pitch of the audio.
+
+- **Options:**
+  - `pitch` (number): Pitch shift in semitones (positive or negative).
+
+**Example:**
+
+```javascript
+sfx.filter('pitch', { pitch: 2 }); // Shift pitch up by 2 semitones
+```
+
+---
+
+### Filter: `tremolo`
+
+Applies a tremolo effect to the audio.
+
+- **Options:**
+  - `speed` (number): Modulation frequency in Hz (default: `5`).
+  - `depth` (number): Modulation depth (0-1) (default: `0.5`).
+
+**Example:**
+
+```javascript
+sfx.filter('tremolo', { speed: 6, depth: 0.7 });
+```
+
+---
+
+### Filter: `phaser`
+
+Applies a phaser effect to the audio.
+
+- **Options:**
+  - `in_gain` (number): Input gain (default: `0.4`).
+  - `out_gain` (number): Output gain (default: `0.74`).
+  - `delay` (number): Delay in milliseconds (default: `3`).
+  - `decay` (number): Decay (default: `0.4`).
+  - `speed` (number): Modulation speed in Hz (default: `0.5`).
+  - `type` (number): Modulation type (0-1) (default: `0`).
+
+**Example:**
+
+```javascript
+sfx.filter('phaser', { delay: 4, decay: 0.5, speed: 0.8 });
+```
+
+---
+
 ## ⚠️ Important Notes
 
 - **FFmpeg Installation:** Ensure FFmpeg is installed and accessible in your system's PATH.
 - **File Permissions:** The module creates and deletes temporary files during processing. Ensure the application has the necessary permissions.
 - **Audio Formats:** The module assumes input files are in MP3 format. For other formats, adjust codec and format settings accordingly.
 - **Error Handling:** Always handle rejections from the `save()` method to catch any processing errors.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙌 Contributing
-
-Contributions are welcome! Feel free to submit a pull request or open an issue on GitHub.
 
 ---
 
@@ -385,6 +477,26 @@ If you encounter any issues or have questions, please open an issue on the [GitH
 ## 🌟 Acknowledgments
 
 - Special thanks to the developers of FFmpeg and fluent-ffmpeg for their invaluable tools.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! If you find any issues or have suggestions for improvement, please open an issue or submit a pull request on the [GitHub repository](https://github.com/clasen/ModelMix).
+
+---
+
+## 📄 License
+
+The MIT License (MIT)
+
+Copyright (c) Martin Clasen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 

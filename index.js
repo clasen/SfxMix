@@ -209,55 +209,120 @@ function getFilterChain(filterName, options) {
     switch (filterName) {
         case 'normalize':
             // Normalize audio using loudnorm filter with parameters
-            // Options: i (target integrated loudness), tp (true peak), lra (loudness range)
             const i = options.i || -16;
             const tp = options.tp || -1.5;
             const lra = options.lra || 11;
             return `loudnorm=I=${i}:TP=${tp}:LRA=${lra}:print_format=none`;
+
         case 'telephone':
             // Telephone effect with parameters
-            // Options: lowFreq (default 300), highFreq (default 3400)
             const lowFreq = options.lowFreq || 300;
-            const highFreq = options.highFreq || 3400;
+            const highFreq = options.highFreq || 3000;
             return `highpass=f=${lowFreq}, lowpass=f=${highFreq}`;
+
         case 'echo':
-            // Default echo parameters: delay=500ms, decay=0.5
+            // Echo effect with parameters
             const echoDelay = options.delay || 500;
             const echoDecay = options.decay || 0.5;
             return `aecho=0.8:0.88:${echoDelay}:${echoDecay}`;
+
         case 'reverb':
-            // Simple reverb effect
-            return 'areverb';
+            // Reverb effect with parameters
+            // Options: room_size, reverberance, damping, hf_damping, stereo_depth, pre_delay, wet_gain, wet_only
+            const room_size = options.room_size !== undefined ? options.room_size : 50;
+            const reverberance = options.reverberance !== undefined ? options.reverberance : 50;
+            const damping = options.damping !== undefined ? options.damping : 50;
+            const hf_damping = options.hf_damping !== undefined ? options.hf_damping : 50;
+            const stereo_depth = options.stereo_depth !== undefined ? options.stereo_depth : 0;
+            const pre_delay = options.pre_delay !== undefined ? options.pre_delay : 0;
+            const wet_gain = options.wet_gain !== undefined ? options.wet_gain : 0;
+            const wet_only = options.wet_only !== undefined ? options.wet_only : 0;
+            return `areverb=room_size=${room_size}:reverberance=${reverberance}:damping=${damping}:hf_damping=${hf_damping}:stereo_depth=${stereo_depth}:pre_delay=${pre_delay}:wet_gain=${wet_gain}:wet_only=${wet_only}`;
+
         case 'highpass':
-            // High-pass filter: cutoff frequency in Hz
+            // High-pass filter
             if (options.frequency) {
                 return `highpass=f=${options.frequency}`;
             } else {
                 throw new Error('High-pass filter requires "frequency" option.');
             }
+
         case 'lowpass':
-            // Low-pass filter: cutoff frequency in Hz
+            // Low-pass filter
             if (options.frequency) {
                 return `lowpass=f=${options.frequency}`;
             } else {
                 throw new Error('Low-pass filter requires "frequency" option.');
             }
+
         case 'volume':
-            // Volume adjustment: volume multiplier (e.g., 0.5 for 50%)
+            // Volume adjustment
             if (options.volume !== undefined) {
                 return `volume=${options.volume}`;
             } else {
                 throw new Error('Volume filter requires "volume" option.');
             }
+
         case 'equalizer':
-            // Equalizer filter: frequency, width, gain
+            // Equalizer filter
             if (options.frequency && options.width && options.gain !== undefined) {
                 return `equalizer=f=${options.frequency}:width_type=h:width=${options.width}:g=${options.gain}`;
             } else {
                 throw new Error('Equalizer filter requires "frequency", "width", and "gain" options.');
             }
+
+        case 'compressor':
+            // Compressor effect
+            // Options: threshold, ratio, attack, release
+            const threshold = options.threshold !== undefined ? options.threshold : -18;
+            const ratio = options.ratio !== undefined ? options.ratio : 2;
+            const attack = options.attack !== undefined ? options.attack : 20;
+            const release = options.release !== undefined ? options.release : 250;
+            return `acompressor=threshold=${threshold}:ratio=${ratio}:attack=${attack}:release=${release}`;
+
+        case 'flanger':
+            // Flanger effect
+            // Options: delay, depth, regen, width, speed, shape, phase, interp
+            const flangerDelay = options.delay !== undefined ? options.delay : 0;
+            const depth = options.depth !== undefined ? options.depth : 2;
+            const regen = options.regen !== undefined ? options.regen : 0;
+            const width = options.width !== undefined ? options.width : 71;
+            const speed = options.speed !== undefined ? options.speed : 0.5;
+            const shape = options.shape !== undefined ? options.shape : 'sine';
+            const phase = options.phase !== undefined ? options.phase : 25;
+            const interp = options.interp !== undefined ? options.interp : 'linear';
+            return `flanger=delay=${flangerDelay}:depth=${depth}:regen=${regen}:width=${width}:speed=${speed}:shape=${shape}:phase=${phase}:interp=${interp}`;
+
+        case 'pitch':
+            // Pitch shift effect
+            // Options: pitch (in semitones)
+            if (options.pitch !== undefined) {
+                const pitch = options.pitch;
+                return `asetrate=44100*${Math.pow(2, pitch / 12)},aresample=44100`;
+            } else {
+                throw new Error('Pitch filter requires "pitch" option.');
+            }
+
+        case 'tremolo':
+            // Tremolo effect
+            // Options: speed, depth
+            const tremoloSpeed = options.speed !== undefined ? options.speed : 5;
+            const tremoloDepth = options.depth !== undefined ? options.depth : 0.5;
+            return `tremolo=f=${tremoloSpeed}:d=${tremoloDepth}`;
+
+        case 'phaser':
+            // Phaser effect
+            // Options: in_gain, out_gain, delay, decay, speed, type
+            const in_gain = options.in_gain !== undefined ? options.in_gain : 0.4;
+            const out_gain = options.out_gain !== undefined ? options.out_gain : 0.74;
+            const delay = options.delay !== undefined ? options.delay : 3;
+            const decay = options.decay !== undefined ? options.decay : 0.4;
+            const speed_ph = options.speed !== undefined ? options.speed : 0.5;
+            const type = options.type !== undefined ? options.type : 0;
+            return `aphaser=in_gain=${in_gain}:out_gain=${out_gain}:delay=${delay}:decay=${decay}:speed=${speed_ph}:type=${type}`;
+
         default:
-            return null;
+            throw new Error(`Unknown filter: ${filterName}`);
     }
 }
 
