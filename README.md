@@ -193,19 +193,19 @@ Applies an audio filter to the current audio.
 
 **Supported Filters:**
 
-- [`normalize`](#filternormalize)
-- [`telephone`](#filtertelephone)
-- [`echo`](#filterecho)
-- [`reverb`](#filterreverb)
-- [`highpass`](#filterhighpass)
-- [`lowpass`](#filterlowpass)
-- [`volume`](#filtervolume)
-- [`equalizer`](#filterequalizer)
-- [`compressor`](#filtercompressor)
-- [`flanger`](#filterflanger)
-- [`pitch`](#filterpitch)
-- [`tremolo`](#filtertremolo)
-- [`phaser`](#filterphaser)
+- [`normalize`](#filter-normalize)
+- [`telephone`](#filter-telephone)
+- [`echo`](#filter-echo)
+- [`reverb`](#filter-reverb)
+- [`highpass`](#filter-highpass)
+- [`lowpass`](#filter-lowpass)
+- [`volume`](#filter-volume)
+- [`equalizer`](#filter-equalizer)
+- [`compressor`](#filter-compressor)
+- [`flanger`](#filter-flanger)
+- [`pitch`](#filter-pitch)
+- [`tremolo`](#filter-tremolo)
+- [`phaser`](#filter-phaser)
 
 ---
 
