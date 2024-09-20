@@ -9,7 +9,7 @@
 - **Concatenate** multiple audio files seamlessly.
 - **Mix** audio tracks with adjustable durations.
 - **Insert silence** at any point in your audio sequence.
-- **Apply filters** like echo, reverb, normalize, and more.
+- **Apply filters** like echo, normalize, highpass, lowpass, volume, equalizer, flanger, pitch, tremolo, phaser, tempo, and more.
 - **Parameterizable filters** for fine-grained control.
 - **Fluent interface** for chaining multiple operations.
 
@@ -116,6 +116,15 @@ sfx
     .save('enhanced_announcement.mp3');
 ```
 
+### 6. Change Tempo of Audio
+
+```javascript
+sfx
+    .add('speech.mp3')
+    .filter('tempo', { x: 1.25 }) // Increase tempo by 25%
+    .save('faster_speech.mp3');
+```
+
 ---
 
 ## 📖 API Documentation
@@ -196,16 +205,15 @@ Applies an audio filter to the current audio.
 - [`normalize`](#filter-normalize)
 - [`telephone`](#filter-telephone)
 - [`echo`](#filter-echo)
-- [`reverb`](#filter-reverb)
 - [`highpass`](#filter-highpass)
 - [`lowpass`](#filter-lowpass)
 - [`volume`](#filter-volume)
 - [`equalizer`](#filter-equalizer)
-- [`compressor`](#filter-compressor)
 - [`flanger`](#filter-flanger)
 - [`pitch`](#filter-pitch)
 - [`tremolo`](#filter-tremolo)
 - [`phaser`](#filter-phaser)
+- [`tempo`](#filter-tempo)
 
 ---
 
@@ -276,28 +284,6 @@ sfx.filter('echo', { delay: 1000, decay: 0.6 });
 
 ---
 
-### Filter: `reverb`
-
-Applies a reverb effect to the audio.
-
-- **Options:**
-  - `room_size` (number): Size of the room (default: `50`).
-  - `reverberance` (number): Amount of reverberation (default: `50`).
-  - `damping` (number): Damping factor (default: `50`).
-  - `hf_damping` (number): High-frequency damping (default: `50`).
-  - `stereo_depth` (number): Stereo depth (default: `0`).
-  - `pre_delay` (number): Pre-delay time in milliseconds (default: `0`).
-  - `wet_gain` (number): Gain of the wet signal (default: `0`).
-  - `wet_only` (number): If set to `1`, only the wet signal is output (default: `0`).
-
-**Example:**
-
-```javascript
-sfx.filter('reverb');
-```
-
----
-
 ### Filter: `highpass`
 
 Applies a high-pass filter to remove frequencies below the cutoff.
@@ -356,24 +342,6 @@ Applies an equalizer effect to adjust specific frequencies.
 
 ```javascript
 sfx.filter('equalizer', { frequency: 1000, width: 200, gain: -10 });
-```
-
----
-
-### Filter: `compressor`
-
-Applies a dynamic range compressor to the audio.
-
-- **Options:**
-  - `threshold` (number): Threshold level in dB (default: `-18`).
-  - `ratio` (number): Compression ratio (default: `2`).
-  - `attack` (number): Attack time in milliseconds (default: `20`).
-  - `release` (number): Release time in milliseconds (default: `250`).
-
-**Example:**
-
-```javascript
-sfx.filter('compressor', { threshold: -20, ratio: 4, attack: 15, release: 300 });
 ```
 
 ---
@@ -447,6 +415,21 @@ Applies a phaser effect to the audio.
 
 ```javascript
 sfx.filter('phaser', { delay: 4, decay: 0.5, speed: 0.8 });
+```
+
+---
+
+### Filter: `tempo`
+
+Changes the tempo of the audio without altering its pitch.
+
+- **Options:**
+  - `x` (number): Tempo change factor (e.g., `1.25` to increase tempo by 25%, `0.8` to decrease by 20%). Must be between `0.5` and `2.0`.
+
+**Example:**
+
+```javascript
+sfx.filter('tempo', { x: 1.25 }); // Increase tempo by 25%
 ```
 
 ---

@@ -95,6 +95,7 @@ class SfxMix {
 
                 resolve(output);
             } catch (err) {
+                console.error('Error during audio processing:', err);
                 reject(err);
             }
         });
@@ -221,23 +222,15 @@ function getFilterChain(filterName, options) {
             return `highpass=f=${lowFreq}, lowpass=f=${highFreq}`;
 
         case 'echo':
-            // Echo effect with parameters
-            const echoDelay = options.delay || 500;
-            const echoDecay = options.decay || 0.5;
-            return `aecho=0.8:0.88:${echoDelay}:${echoDecay}`;
+            // Reverb effect using aecho filter
+            const inGain = options.inGain !== undefined ? options.inGain : 0.8;
+            const outGain = options.outGain !== undefined ? options.outGain : 0.9;
+            const delays = options.delays !== undefined ? options.delays : [1, 200, 300, 400];
+            const decays = options.decays !== undefined ? options.decays : [0.5, 0.5, 0.5, 0.5];
 
-        case 'reverb':
-            // Reverb effect with parameters
-            // Options: room_size, reverberance, damping, hf_damping, stereo_depth, pre_delay, wet_gain, wet_only
-            const room_size = options.room_size !== undefined ? options.room_size : 50;
-            const reverberance = options.reverberance !== undefined ? options.reverberance : 50;
-            const damping = options.damping !== undefined ? options.damping : 50;
-            const hf_damping = options.hf_damping !== undefined ? options.hf_damping : 50;
-            const stereo_depth = options.stereo_depth !== undefined ? options.stereo_depth : 0;
-            const pre_delay = options.pre_delay !== undefined ? options.pre_delay : 0;
-            const wet_gain = options.wet_gain !== undefined ? options.wet_gain : 0;
-            const wet_only = options.wet_only !== undefined ? options.wet_only : 0;
-            return `areverb=room_size=${room_size}:reverberance=${reverberance}:damping=${damping}:hf_damping=${hf_damping}:stereo_depth=${stereo_depth}:pre_delay=${pre_delay}:wet_gain=${wet_gain}:wet_only=${wet_only}`;
+            const delaysStr = delays.join('|');
+            const decaysStr = decays.join('|');
+            return `aecho=${inGain}:${outGain}:${delaysStr}:${decaysStr}`;
 
         case 'highpass':
             // High-pass filter
@@ -271,15 +264,6 @@ function getFilterChain(filterName, options) {
                 throw new Error('Equalizer filter requires "frequency", "width", and "gain" options.');
             }
 
-        case 'compressor':
-            // Compressor effect
-            // Options: threshold, ratio, attack, release
-            const threshold = options.threshold !== undefined ? options.threshold : -18;
-            const ratio = options.ratio !== undefined ? options.ratio : 2;
-            const attack = options.attack !== undefined ? options.attack : 20;
-            const release = options.release !== undefined ? options.release : 250;
-            return `acompressor=threshold=${threshold}:ratio=${ratio}:attack=${attack}:release=${release}`;
-
         case 'flanger':
             // Flanger effect
             // Options: delay, depth, regen, width, speed, shape, phase, interp
@@ -291,7 +275,7 @@ function getFilterChain(filterName, options) {
             const shape = options.shape !== undefined ? options.shape : 'sine';
             const phase = options.phase !== undefined ? options.phase : 25;
             const interp = options.interp !== undefined ? options.interp : 'linear';
-            return `flanger=delay=${flangerDelay}:depth=${depth}:regen=${regen}:width=${width}:speed=${speed}:shape=${shape}:phase=${phase}:interp=${interp}`;
+            return `aflanger=delay=${flangerDelay}:depth=${depth}:regen=${regen}:width=${width}:speed=${speed}:shape=${shape}:phase=${phase}:interp=${interp}`;
 
         case 'pitch':
             // Pitch shift effect
@@ -305,10 +289,9 @@ function getFilterChain(filterName, options) {
 
         case 'tremolo':
             // Tremolo effect
-            // Options: speed, depth
-            const tremoloSpeed = options.speed !== undefined ? options.speed : 5;
-            const tremoloDepth = options.depth !== undefined ? options.depth : 0.5;
-            return `tremolo=f=${tremoloSpeed}:d=${tremoloDepth}`;
+            // Options: frequency
+            const frequency = options.frequency !== undefined ? options.frequency : 1;
+            return `tremolo=f=${frequency}`;
 
         case 'phaser':
             // Phaser effect
@@ -320,6 +303,34 @@ function getFilterChain(filterName, options) {
             const speed_ph = options.speed !== undefined ? options.speed : 0.5;
             const type = options.type !== undefined ? options.type : 0;
             return `aphaser=in_gain=${in_gain}:out_gain=${out_gain}:delay=${delay}:decay=${decay}:speed=${speed_ph}:type=${type}`;
+
+        case 'tempo':
+            // Change the speed without changing the tone
+            // Options: x (speed factor, between 0.5 and 2.0)
+            if (options.x !== undefined) {
+                const tempo = options.x;
+                if (tempo < 0.5 || tempo > 2.0) {
+                    // If the value is outside the supported range, chain filters
+                    const tempos = [];
+                    let remainingTempo = tempo;
+                    while (remainingTempo < 0.5 || remainingTempo > 2.0) {
+                        if (remainingTempo < 0.5) {
+                            tempos.push(0.5);
+                            remainingTempo /= 0.5;
+                        } else {
+                            tempos.push(2.0);
+                            remainingTempo /= 2.0;
+                        }
+                    }
+                    tempos.push(remainingTempo);
+                    const atempoFilters = tempos.map(t => `atempo=${t}`).join(',');
+                    return atempoFilters;
+                } else {
+                    return `atempo=${tempo}`;
+                }
+            } else {
+                throw new Error('The tempo filter requires the "x" option.');
+            }
 
         default:
             throw new Error(`Unknown filter: ${filterName}`);
