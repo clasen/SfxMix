@@ -241,7 +241,7 @@ Normalizes audio loudness to a specified target using the EBU R128 standard.
 
 - **Options:**
   - `tp` (number): Maximum true peak level in dBTP (default: `-3`).
-  - `i` (number): Target integrated loudness in LUFS (default: `-16`).
+  - `i` (number): Target integrated loudness in LUFS (default: `-20`).
   - `lra` (number): Loudness range in LU (default: `11`).
 
 **Example:**
@@ -258,7 +258,7 @@ Applies a telephone effect by applying high-pass and low-pass filters.
 
 - **Options:**
   - `lowFreq` (number): High-pass filter cutoff frequency in Hz (default: `300`).
-  - `highFreq` (number): Low-pass filter cutoff frequency in Hz (default: `3000`).
+  - `highFreq` (number): Low-pass filter cutoff frequency in Hz (default: `2800`).
 
 **Example:**
 

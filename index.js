@@ -211,14 +211,14 @@ function getFilterChain(filterName, options) {
         case 'normalize':
             // Normalize audio using loudnorm filter with parameters
             const tp = options.tp || -3;
-            const i = options.i || -16;
+            const i = options.i || -20;
             const lra = options.lra || 11;
             return `loudnorm=I=${i}:TP=${tp}:LRA=${lra}:print_format=none`;
 
         case 'telephone':
             // Telephone effect with parameters
             const lowFreq = options.lowFreq || 300;
-            const highFreq = options.highFreq || 3000;
+            const highFreq = options.highFreq || 2800;
             return `highpass=f=${lowFreq}, lowpass=f=${highFreq}`;
 
         case 'echo':
