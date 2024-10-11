@@ -134,27 +134,21 @@ class SfxMix {
 
     concatenateAudioFiles(inputFiles, outputFile) {
         return new Promise((resolve, reject) => {
-            // Use absolute paths for input files
-            const absoluteInputFiles = inputFiles.map(file => path.resolve(file));
+            // Use absolute paths for input files based on process.cwd()
+            const absoluteInputFiles = inputFiles.map(file => path.isAbsolute(file) ? file : path.resolve(process.cwd(), file));
             const concatList = absoluteInputFiles.map(file => `file '${file}'`).join('\n');
             const concatFile = path.join(this.TMP_DIR, `concat_${uuidv4()}.txt`);
 
             try {
                 fs.writeFileSync(concatFile, concatList);
-                // console.log(`Concat file created at: ${concatFile}`);
-                // console.log(`Concat file contents:\n${concatList}`);
 
                 ffmpeg()
                     .input(concatFile)
                     .inputOptions(['-f', 'concat', '-safe', '0'])
                     .outputOptions(['-c', 'copy'])
                     .output(outputFile)
-                    .on('start', (commandLine) => {
-                        // console.log('Spawned FFmpeg with command: ' + commandLine);
-                    })
                     .on('end', () => {
                         fs.unlinkSync(concatFile);
-                        // console.log(`Concatenation complete. Output file: ${outputFile}`);
                         resolve();
                     })
                     .on('error', (err) => {
