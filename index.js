@@ -2,6 +2,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { Readable } = require('stream');
 
 class SfxMix {
     constructor(config = {}) {
@@ -213,9 +214,29 @@ class SfxMix {
     generateSilence(durationMs, outputFile) {
         return new Promise((resolve, reject) => {
             const durationSec = durationMs / 1000;
+            const sampleRate = 44100;
+            const numChannels = 2; // Stereo
+            const bytesPerSample = 2; // 16-bit audio
+            const bytesPerSecond = sampleRate * numChannels * bytesPerSample;
+            let totalBytes = Math.floor(durationSec * bytesPerSecond);
+
+            const silenceStream = new Readable({
+                read(size) {
+                    const chunkSize = Math.min(size, totalBytes);
+                    if (chunkSize <= 0) {
+                        this.push(null);
+                        return;
+                    }
+                    this.push(Buffer.alloc(chunkSize, 0));
+                    totalBytes -= chunkSize;
+                }
+            });
+
             ffmpeg()
-                .input('anullsrc=channel_layout=stereo:sample_rate=44100')
-                .inputOptions(['-f', 'lavfi', '-t', `${durationSec}`])
+                .input(silenceStream)
+                .inputFormat('s16le')
+                .audioChannels(numChannels)
+                .audioFrequency(sampleRate)
                 .audioCodec('libmp3lame')
                 .format('mp3')
                 .output(outputFile)
