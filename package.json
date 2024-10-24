@@ -1,7 +1,7 @@
 {
     "name": "sfxmix",
     "description": "🎧 SfxMix - Powerful and easy-to-use module for processing audio.",
-    "version": "1.2.0",
+    "version": "1.2.2",
     "main": "index.js",
     "dependencies": {
         "fluent-ffmpeg": "^2.1.3",

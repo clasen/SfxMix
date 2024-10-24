@@ -103,12 +103,32 @@ class SfxMix {
                     }
                 }
                 // Finalize output
-                fs.renameSync(this.currentFile, output);
+                const absoluteOutput = path.resolve(process.cwd(), output);
+                const outputDir = path.dirname(absoluteOutput);
+
+                // Ensure the output directory exists
+                if (!fs.existsSync(outputDir)) {
+                    fs.mkdirSync(outputDir, { recursive: true });
+                }
+
+                // Check if the source file exists
+                if (!fs.existsSync(this.currentFile)) {
+                    throw new Error(`Source file does not exist: ${this.currentFile}`);
+                }
+
+                // Attempt to rename the file
+                try {
+                    fs.renameSync(this.currentFile, absoluteOutput);
+                } catch (renameErr) {
+                    // If rename fails, try to copy the file instead
+                    fs.copyFileSync(this.currentFile, absoluteOutput);
+                    fs.unlinkSync(this.currentFile);
+                }
 
                 // Reset internal state
                 this.reset();
 
-                resolve(output);
+                resolve(absoluteOutput);
             } catch (err) {
                 console.error('Error during audio processing:', err);
                 reject(err);
