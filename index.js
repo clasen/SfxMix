@@ -48,7 +48,103 @@ class SfxMix {
         return this;
     }
 
+    exportOgg(output) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                for (let action of this.actions) {
+                    if (action.type === 'add') {
+                        if (this.currentFile == null) {
+                            this.currentFile = path.isAbsolute(action.input) ? action.input : path.resolve(process.cwd(), action.input);
+                        } else {
+                            const tempFile = path.join(this.TMP_DIR, `temp_concat_${uuidv4()}.mp3`);
+                            await this.concatenateAudioFiles([this.currentFile, action.input], tempFile);
+                            if (this.isTempFile(this.currentFile)) {
+                                fs.unlinkSync(this.currentFile);
+                            }
+                            this.currentFile = tempFile;
+                        }
+                    } else if (action.type === 'mix') {
+                        if (this.currentFile == null) {
+                            throw new Error('No audio to mix with. Add or concatenate audio before mixing.');
+                        }
+                        const tempFile = path.join(this.TMP_DIR, `temp_mix_${uuidv4()}.mp3`);
+                        await this.mixAudioFiles(this.currentFile, action.input, tempFile, action.options);
+                        if (this.isTempFile(this.currentFile)) {
+                            fs.unlinkSync(this.currentFile);
+                        }
+                        this.currentFile = tempFile;
+                    } else if (action.type === 'silence') {
+                        const tempSilenceFile = path.join(this.TMP_DIR, `temp_silence_${uuidv4()}.mp3`);
+                        await this.generateSilence(action.duration, tempSilenceFile);
+                        if (this.currentFile == null) {
+                            this.currentFile = tempSilenceFile;
+                        } else {
+                            const tempFile = path.join(this.TMP_DIR, `temp_concat_${uuidv4()}.mp3`);
+                            await this.concatenateAudioFiles([this.currentFile, tempSilenceFile], tempFile);
+                            if (this.isTempFile(this.currentFile)) {
+                                fs.unlinkSync(this.currentFile);
+                            }
+                            fs.unlinkSync(tempSilenceFile);
+                            this.currentFile = tempFile;
+                        }
+                    } else if (action.type === 'filter') {
+                        if (this.currentFile == null) {
+                            throw new Error('No audio to apply filter to. Add audio before applying filters.');
+                        }
+                        const tempFile = path.join(this.TMP_DIR, `temp_filter_${uuidv4()}.mp3`);
+                        await this.applyFilter(this.currentFile, action.filterName, action.options, tempFile);
+                        if (this.isTempFile(this.currentFile)) {
+                            fs.unlinkSync(this.currentFile);
+                        }
+                        this.currentFile = tempFile;
+                    }
+                }
+                
+                const absoluteOutput = path.resolve(process.cwd(), output);
+                const outputDir = path.dirname(absoluteOutput);
+
+                if (!fs.existsSync(outputDir)) {
+                    fs.mkdirSync(outputDir, { recursive: true });
+                }
+
+                if (!fs.existsSync(this.currentFile)) {
+                    throw new Error(`Source file does not exist: ${this.currentFile}`);
+                }
+
+                await this.convertToOgg(this.currentFile, absoluteOutput);
+
+                if (this.isTempFile(this.currentFile)) {
+                    fs.unlinkSync(this.currentFile);
+                }
+
+                this.reset();
+                resolve(absoluteOutput);
+            } catch (err) {
+                console.error('Error during OGG export:', err);
+                reject(err);
+            }
+        });
+    }
+
+    convertToOgg(inputFile, outputFile) {
+        return new Promise((resolve, reject) => {
+            ffmpeg()
+                .input(inputFile)
+                .audioCodec('libopus')
+                .format('ogg')
+                .output(outputFile)
+                .on('end', () => resolve())
+                .on('error', (err) => reject(err))
+                .run();
+        });
+    }
+
     save(output) {
+        // Check if output file has .ogg extension
+        if (output.toLowerCase().endsWith('.ogg')) {
+            return this.exportOgg(output);
+        }
+        
         return new Promise(async (resolve, reject) => {
             try {
                 for (let action of this.actions) {
@@ -202,8 +298,8 @@ class SfxMix {
                         },
                     },
                 ])
-                .audioCodec('libmp3lame') // Ensure the codec is MP3
-                .format('mp3') // Ensure the format is MP3
+                .audioCodec('libmp3lame')
+                .format('mp3')
                 .output(outputFile)
                 .on('end', () => resolve())
                 .on('error', (err) => reject(err))
