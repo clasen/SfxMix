@@ -48,9 +48,61 @@ class SfxMix {
         return this;
     }
 
-    exportOgg(output) {
+
+
+    convertAudio(inputFile, outputFile, outputOptions = {}) {
+        return new Promise((resolve, reject) => {
+            const command = ffmpeg().input(inputFile);
+            
+            // Apply custom output options if provided
+            if (Object.keys(outputOptions).length > 0) {
+                // Convert object to array format for FFmpeg
+                const optionsArray = [];
+                for (const [key, value] of Object.entries(outputOptions)) {
+                    optionsArray.push(`-${key}`, value);
+                }
+                command.outputOptions(optionsArray);
+            } else {
+                // Auto-detect format and apply defaults based on file extension
+                const ext = path.extname(outputFile).toLowerCase();
+                switch (ext) {
+                    case '.ogg':
+                        command.audioCodec('libopus').format('ogg');
+                        break;
+                    case '.wav':
+                        command.audioCodec('pcm_s16le').format('wav');
+                        break;
+                    case '.flac':
+                        command.audioCodec('flac').format('flac');
+                        break;
+                    case '.aac':
+                    case '.m4a':
+                        command.audioCodec('aac').format('mp4');
+                        break;
+                    case '.mp3':
+                    default:
+                        command.audioCodec('libmp3lame').format('mp3');
+                        break;
+                }
+            }
+            
+            command
+                .output(outputFile)
+                .on('end', () => resolve())
+                .on('error', (err) => reject(err))
+                .run();
+        });
+    }
+
+    // Keep convertToOgg for backward compatibility
+    convertToOgg(inputFile, outputFile, options = {}) {
+        return this.convertAudio(inputFile, outputFile, options);
+    }
+
+    save(output, outputOptions = {}) {
         return new Promise(async (resolve, reject) => {
             try {
+                // Process all actions
                 for (let action of this.actions) {
                     if (action.type === 'add') {
                         if (this.currentFile == null) {
@@ -100,6 +152,7 @@ class SfxMix {
                     }
                 }
                 
+                // Prepare output
                 const absoluteOutput = path.resolve(process.cwd(), output);
                 const outputDir = path.dirname(absoluteOutput);
 
@@ -111,120 +164,34 @@ class SfxMix {
                     throw new Error(`Source file does not exist: ${this.currentFile}`);
                 }
 
-                await this.convertToOgg(this.currentFile, absoluteOutput);
+                // Check if we need format conversion
+                const needsConversion = Object.keys(outputOptions).length > 0 || 
+                                      output.toLowerCase().endsWith('.ogg') || 
+                                      output.toLowerCase().endsWith('.wav') || 
+                                      output.toLowerCase().endsWith('.flac') ||
+                                      output.toLowerCase().endsWith('.aac') ||
+                                      output.toLowerCase().endsWith('.m4a');
 
-                if (this.isTempFile(this.currentFile)) {
-                    fs.unlinkSync(this.currentFile);
-                }
-
-                this.reset();
-                resolve(absoluteOutput);
-            } catch (err) {
-                console.error('Error during OGG export:', err);
-                reject(err);
-            }
-        });
-    }
-
-    convertToOgg(inputFile, outputFile) {
-        return new Promise((resolve, reject) => {
-            ffmpeg()
-                .input(inputFile)
-                .audioCodec('libopus')
-                .format('ogg')
-                .output(outputFile)
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err))
-                .run();
-        });
-    }
-
-    save(output) {
-        // Check if output file has .ogg extension
-        if (output.toLowerCase().endsWith('.ogg')) {
-            return this.exportOgg(output);
-        }
-        
-        return new Promise(async (resolve, reject) => {
-            try {
-                for (let action of this.actions) {
-                    if (action.type === 'add') {
-                        // Existing add logic
-                        if (this.currentFile == null) {
-                            this.currentFile = action.input;
-                        } else {
-                            const tempFile = path.join(this.TMP_DIR, `temp_concat_${uuidv4()}.mp3`);
-                            await this.concatenateAudioFiles([this.currentFile, action.input], tempFile);
-                            if (this.isTempFile(this.currentFile)) {
-                                fs.unlinkSync(this.currentFile);
-                            }
-                            this.currentFile = tempFile;
-                        }
-                    } else if (action.type === 'mix') {
-                        // Existing mix logic
-                        if (this.currentFile == null) {
-                            throw new Error('No audio to mix with. Add or concatenate audio before mixing.');
-                        }
-                        const tempFile = path.join(this.TMP_DIR, `temp_mix_${uuidv4()}.mp3`);
-                        await this.mixAudioFiles(this.currentFile, action.input, tempFile, action.options);
-                        if (this.isTempFile(this.currentFile)) {
-                            fs.unlinkSync(this.currentFile);
-                        }
-                        this.currentFile = tempFile;
-                    } else if (action.type === 'silence') {
-                        // Existing silence logic
-                        const tempSilenceFile = path.join(this.TMP_DIR, `temp_silence_${uuidv4()}.mp3`);
-                        await this.generateSilence(action.duration, tempSilenceFile);
-                        if (this.currentFile == null) {
-                            this.currentFile = tempSilenceFile;
-                        } else {
-                            const tempFile = path.join(this.TMP_DIR, `temp_concat_${uuidv4()}.mp3`);
-                            await this.concatenateAudioFiles([this.currentFile, tempSilenceFile], tempFile);
-                            if (this.isTempFile(this.currentFile)) {
-                                fs.unlinkSync(this.currentFile);
-                            }
-                            fs.unlinkSync(tempSilenceFile); // Remove the silence file
-                            this.currentFile = tempFile;
-                        }
-                    } else if (action.type === 'filter') {
-                        // New filter logic
-                        if (this.currentFile == null) {
-                            throw new Error('No audio to apply filter to. Add audio before applying filters.');
-                        }
-                        const tempFile = path.join(this.TMP_DIR, `temp_filter_${uuidv4()}.mp3`);
-                        await this.applyFilter(this.currentFile, action.filterName, action.options, tempFile);
-                        if (this.isTempFile(this.currentFile)) {
-                            fs.unlinkSync(this.currentFile);
-                        }
-                        this.currentFile = tempFile;
+                if (needsConversion) {
+                    // Use conversion with custom options
+                    await this.convertAudio(this.currentFile, absoluteOutput, outputOptions);
+                } else {
+                    // Save as MP3 or original format (no conversion needed)
+                    try {
+                        fs.renameSync(this.currentFile, absoluteOutput);
+                    } catch (renameErr) {
+                        // If rename fails, try to copy the file instead
+                        fs.copyFileSync(this.currentFile, absoluteOutput);
+                        fs.unlinkSync(this.currentFile);
                     }
                 }
-                // Finalize output
-                const absoluteOutput = path.resolve(process.cwd(), output);
-                const outputDir = path.dirname(absoluteOutput);
 
-                // Ensure the output directory exists
-                if (!fs.existsSync(outputDir)) {
-                    fs.mkdirSync(outputDir, { recursive: true });
-                }
-
-                // Check if the source file exists
-                if (!fs.existsSync(this.currentFile)) {
-                    throw new Error(`Source file does not exist: ${this.currentFile}`);
-                }
-
-                // Attempt to rename the file
-                try {
-                    fs.renameSync(this.currentFile, absoluteOutput);
-                } catch (renameErr) {
-                    // If rename fails, try to copy the file instead
-                    fs.copyFileSync(this.currentFile, absoluteOutput);
+                // Clean up temp file if it exists and wasn't renamed
+                if (this.isTempFile(this.currentFile) && fs.existsSync(this.currentFile)) {
                     fs.unlinkSync(this.currentFile);
                 }
 
-                // Reset internal state
                 this.reset();
-
                 resolve(absoluteOutput);
             } catch (err) {
                 console.error('Error during audio processing:', err);
