@@ -9,6 +9,9 @@ class SfxMix {
         this.actions = [];
         this.currentFile = null;
         this.TMP_DIR = path.resolve(config.tmpDir || path.join(__dirname, 'tmp'));
+        
+        // Default bitrate: null = auto-detect, or specify a value (e.g., 64000, 128000, 192000)
+        this.bitrate = config.bitrate !== undefined ? config.bitrate : 64000;
 
         // Ensure the temporary directory exists and is writable
         try {
@@ -127,7 +130,16 @@ class SfxMix {
                         this.currentFile = tempFile;
                     } else if (action.type === 'silence') {
                         const tempSilenceFile = path.join(this.TMP_DIR, `temp_silence_${uuidv4()}.mp3`);
-                        await this.generateSilence(action.duration, tempSilenceFile);
+                        // Get audio info from current file to match channels and sample rate
+                        let audioInfo = null;
+                        if (this.currentFile != null) {
+                            try {
+                                audioInfo = await this.getAudioInfo(this.currentFile);
+                            } catch (err) {
+                                console.warn('Could not get audio info, using defaults:', err.message);
+                            }
+                        }
+                        await this.generateSilence(action.duration, tempSilenceFile, audioInfo);
                         if (this.currentFile == null) {
                             this.currentFile = tempSilenceFile;
                         } else {
@@ -274,11 +286,38 @@ class SfxMix {
         });
     }
 
-    generateSilence(durationMs, outputFile) {
+    getAudioInfo(inputFile) {
+        return new Promise((resolve, reject) => {
+            ffmpeg.ffprobe(inputFile, (err, metadata) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                
+                const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+                if (!audioStream) {
+                    reject(new Error('No audio stream found'));
+                    return;
+                }
+                
+                resolve({
+                    channels: audioStream.channels || 2,
+                    sampleRate: audioStream.sample_rate || 44100,
+                    bitrate: metadata.format.bit_rate || 128000
+                });
+            });
+        });
+    }
+
+    generateSilence(durationMs, outputFile, audioInfo = null) {
         return new Promise((resolve, reject) => {
             const durationSec = durationMs / 1000;
-            const sampleRate = 44100;
-            const numChannels = 2; // Stereo
+            const sampleRate = audioInfo?.sampleRate || 44100;
+            const numChannels = audioInfo?.channels || 2;
+            
+            // Use audioInfo bitrate if available, otherwise use bitrate or 128000 as fallback
+            const bitrate = audioInfo?.bitrate || this.bitrate || 128000;
+            
             const bytesPerSample = 2; // 16-bit audio
             const bytesPerSecond = sampleRate * numChannels * bytesPerSample;
             let totalBytes = Math.floor(durationSec * bytesPerSecond);
@@ -295,12 +334,15 @@ class SfxMix {
                 }
             });
 
+            const bitrateKbps = Math.floor(bitrate / 1000) + 'k';
+
             ffmpeg()
                 .input(silenceStream)
                 .inputFormat('s16le')
                 .audioChannels(numChannels)
                 .audioFrequency(sampleRate)
                 .audioCodec('libmp3lame')
+                .audioBitrate(bitrateKbps)
                 .format('mp3')
                 .output(outputFile)
                 .on('end', () => {
@@ -316,32 +358,57 @@ class SfxMix {
     }
 
     applyFilter(inputFile, filterName, options, outputFile) {
-        return new Promise((resolve, reject) => {
-            const filterChain = this.getFilterChain(filterName, options);
-            if (!filterChain) {
-                return reject(new Error(`Unknown filter: ${filterName}`));
-            }
+        return new Promise(async (resolve, reject) => {
+            try {
+                const filterChain = this.getFilterChain(filterName, options);
+                if (!filterChain) {
+                    return reject(new Error(`Unknown filter: ${filterName}`));
+                }
 
-            ffmpeg()
-                .input(inputFile)
-                .audioFilters(filterChain)
-                .audioCodec('libmp3lame')
-                .format('mp3')
-                .output(outputFile)
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err))
-                .run();
+                let bitrateKbps;
+                
+                // If bitrate is null, auto-detect from input file
+                if (this.bitrate === null) {
+                    let audioInfo = null;
+                    try {
+                        audioInfo = await this.getAudioInfo(inputFile);
+                    } catch (err) {
+                        console.warn('Could not get audio info for filter, using 128k default:', err.message);
+                    }
+                    bitrateKbps = audioInfo ? Math.floor(audioInfo.bitrate / 1000) + 'k' : '128k';
+                } else {
+                    // Use configured default bitrate
+                    bitrateKbps = Math.floor(this.bitrate / 1000) + 'k';
+                }
+
+                const command = ffmpeg()
+                    .input(inputFile)
+                    .audioFilters(filterChain)
+                    .audioCodec('libmp3lame')
+                    .audioBitrate(bitrateKbps)
+                    .format('mp3')
+                    .output(outputFile);
+
+                command
+                    .on('end', () => resolve())
+                    .on('error', (err) => reject(err))
+                    .run();
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 
     getFilterChain(filterName, options) {
         switch (filterName) {
             case 'normalize':
-                // Normalize audio using loudnorm filter with parameters
-                const tp = options.tp || -3;
-                const i = options.i || -20;
-                const lra = options.lra || 11;
-                return `loudnorm=I=${i}:TP=${tp}:LRA=${lra}:print_format=none`;
+                // Normalize audio using dynaudnorm filter which is more robust
+                // tp parameter is converted to target peak (p parameter, range 0-1)
+                // Default tp of -1.5 dB corresponds to approximately 0.95 peak
+                const tp = options.tp || -1.5;
+                const targetPeak = Math.pow(10, tp / 20); // Convert dB to linear scale
+                const p = Math.min(0.99, Math.max(0.5, targetPeak));
+                return `dynaudnorm=p=${p.toFixed(2)}:m=100:s=10`;
 
             case 'telephone':
                 // Telephone effect with parameters
