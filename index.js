@@ -1,25 +1,32 @@
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { v4: uuidv4 } = require('uuid');
 const { Readable } = require('stream');
+const tmp = require('tmp');
 
 class SfxMix {
     constructor(config = {}) {
         this.actions = [];
         this.currentFile = null;
-        this.TMP_DIR = path.resolve(config.tmpDir || path.join(__dirname, 'tmp'));
+        
+        // Use OS temp directory by default for better reliability
+        const defaultTmpDir = path.join(os.tmpdir(), 'sfxmix');
+        this.TMP_DIR = path.resolve(config.tmpDir || defaultTmpDir);
         
         // Default bitrate: null = auto-detect, or specify a value (e.g., 64000, 128000, 192000)
         this.bitrate = config.bitrate !== undefined ? config.bitrate : 64000;
+        
+        // Configure tmp module for automatic cleanup on exit
+        tmp.setGracefulCleanup();
 
         // Ensure the temporary directory exists and is writable
         try {
             if (!fs.existsSync(this.TMP_DIR)) {
-                fs.mkdirSync(this.TMP_DIR, { recursive: true });
+                fs.mkdirSync(this.TMP_DIR, { recursive: true, mode: 0o755 });
             }
             fs.accessSync(this.TMP_DIR, fs.constants.W_OK);
-            // console.log(`Temporary directory set to: ${this.TMP_DIR}`);
         } catch (err) {
             console.error(`Error accessing temporary directory: ${this.TMP_DIR}`);
             console.error(err);
@@ -121,7 +128,7 @@ class SfxMix {
                             const tempFile = path.join(this.TMP_DIR, `temp_concat_${uuidv4()}.mp3`);
                             await this.concatenateAudioFiles([this.currentFile, action.input], tempFile);
                             if (this.isTempFile(this.currentFile)) {
-                                fs.unlinkSync(this.currentFile);
+                                this.safeDeleteFile(this.currentFile);
                             }
                             this.currentFile = tempFile;
                         }
@@ -132,7 +139,7 @@ class SfxMix {
                         const tempFile = path.join(this.TMP_DIR, `temp_mix_${uuidv4()}.mp3`);
                         await this.mixAudioFiles(this.currentFile, action.input, tempFile, action.options);
                         if (this.isTempFile(this.currentFile)) {
-                            fs.unlinkSync(this.currentFile);
+                            this.safeDeleteFile(this.currentFile);
                         }
                         this.currentFile = tempFile;
                     } else if (action.type === 'silence') {
@@ -153,9 +160,9 @@ class SfxMix {
                             const tempFile = path.join(this.TMP_DIR, `temp_concat_${uuidv4()}.mp3`);
                             await this.concatenateAudioFiles([this.currentFile, tempSilenceFile], tempFile);
                             if (this.isTempFile(this.currentFile)) {
-                                fs.unlinkSync(this.currentFile);
+                                this.safeDeleteFile(this.currentFile);
                             }
-                            fs.unlinkSync(tempSilenceFile);
+                            this.safeDeleteFile(tempSilenceFile);
                             this.currentFile = tempFile;
                         }
                     } else if (action.type === 'filter') {
@@ -165,7 +172,7 @@ class SfxMix {
                         const tempFile = path.join(this.TMP_DIR, `temp_filter_${uuidv4()}.mp3`);
                         await this.applyFilter(this.currentFile, action.filterName, action.options, tempFile);
                         if (this.isTempFile(this.currentFile)) {
-                            fs.unlinkSync(this.currentFile);
+                            this.safeDeleteFile(this.currentFile);
                         }
                         this.currentFile = tempFile;
                     } else if (action.type === 'trim') {
@@ -175,7 +182,7 @@ class SfxMix {
                         const tempFile = path.join(this.TMP_DIR, `temp_trim_${uuidv4()}.mp3`);
                         await this.applyTrim(this.currentFile, action.options, tempFile);
                         if (this.isTempFile(this.currentFile)) {
-                            fs.unlinkSync(this.currentFile);
+                            this.safeDeleteFile(this.currentFile);
                         }
                         this.currentFile = tempFile;
                     }
@@ -204,6 +211,10 @@ class SfxMix {
                 if (needsConversion) {
                     // Use conversion with custom options
                     await this.convertAudio(this.currentFile, absoluteOutput, outputOptions);
+                    // Clean up the source temp file after conversion
+                    if (this.isTempFile(this.currentFile)) {
+                        this.safeDeleteFile(this.currentFile);
+                    }
                 } else {
                     // Save as MP3 or original format (no conversion needed)
                     try {
@@ -211,19 +222,20 @@ class SfxMix {
                     } catch (renameErr) {
                         // If rename fails, try to copy the file instead
                         fs.copyFileSync(this.currentFile, absoluteOutput);
-                        fs.unlinkSync(this.currentFile);
+                        if (this.isTempFile(this.currentFile)) {
+                            this.safeDeleteFile(this.currentFile);
+                        }
                     }
-                }
-
-                // Clean up temp file if it exists and wasn't renamed
-                if (this.isTempFile(this.currentFile) && fs.existsSync(this.currentFile)) {
-                    fs.unlinkSync(this.currentFile);
                 }
 
                 this.reset();
                 resolve(absoluteOutput);
             } catch (err) {
                 console.error('Error during audio processing:', err);
+                // Clean up current temp file if it exists
+                if (this.currentFile && this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
                 reject(err);
             }
         });
@@ -233,6 +245,31 @@ class SfxMix {
         this.actions = [];
         this.currentFile = null;
         return this;
+    }
+
+    // Safe file deletion with retry logic
+    safeDeleteFile(filePath, maxRetries = 3) {
+        if (!filePath || !fs.existsSync(filePath)) {
+            return;
+        }
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                fs.unlinkSync(filePath);
+                return;
+            } catch (err) {
+                if (attempt === maxRetries) {
+                    console.warn(`Failed to delete file after ${maxRetries} attempts: ${filePath}`, err.message);
+                } else {
+                    // Wait a bit before retrying (exponential backoff)
+                    const waitTime = Math.pow(2, attempt) * 10; // 20ms, 40ms, 80ms
+                    const start = Date.now();
+                    while (Date.now() - start < waitTime) {
+                        // Busy wait (not ideal but simple)
+                    }
+                }
+            }
+        }
     }
 
     // Move helper functions inside the class and use this.TMP_DIR
@@ -248,35 +285,84 @@ class SfxMix {
 
     concatenateAudioFiles(inputFiles, outputFile) {
         return new Promise((resolve, reject) => {
-            // Use absolute paths for input files based on process.cwd()
-            const absoluteInputFiles = inputFiles.map(file => path.isAbsolute(file) ? file : path.resolve(process.cwd(), file));
-            const concatList = absoluteInputFiles.map(file => `file '${file}'`).join('\n');
-            const concatFile = path.join(this.TMP_DIR, `concat_${uuidv4()}.txt`);
+            // Use tmp library to create a more robust temporary file
+            tmp.file({ 
+                mode: 0o644, 
+                prefix: 'concat_', 
+                postfix: '.txt',
+                dir: this.TMP_DIR,
+                keep: true // Don't auto-delete, we'll manage it
+            }, (err, concatFile, fd, cleanupCallback) => {
+                if (err) {
+                    console.error('Error creating temporary concat file:', err);
+                    return reject(err);
+                }
 
-            try {
-                fs.writeFileSync(concatFile, concatList);
+                try {
+                    // Use absolute paths for input files based on process.cwd()
+                    const absoluteInputFiles = inputFiles.map(file => 
+                        path.isAbsolute(file) ? file : path.resolve(process.cwd(), file)
+                    );
 
-                ffmpeg()
-                    .input(concatFile)
-                    .inputOptions(['-f', 'concat', '-safe', '0'])
-                    .outputOptions(['-c', 'copy'])
-                    .output(outputFile)
-                    .on('end', () => {
-                        fs.unlinkSync(concatFile);
-                        resolve();
-                    })
-                    .on('error', (err) => {
-                        console.error('FFmpeg error:', err);
-                        if (fs.existsSync(concatFile)) {
-                            fs.unlinkSync(concatFile);
+                    // Verify all input files exist
+                    for (const file of absoluteInputFiles) {
+                        if (!fs.existsSync(file)) {
+                            cleanupCallback();
+                            throw new Error(`Input file does not exist: ${file}`);
                         }
-                        reject(err);
-                    })
-                    .run();
-            } catch (err) {
-                console.error('Error in concatenateAudioFiles:', err);
-                reject(err);
-            }
+                    }
+
+                    const concatList = absoluteInputFiles.map(file => `file '${file}'`).join('\n');
+
+                    // Write using the provided file descriptor
+                    fs.writeSync(fd, concatList);
+                    fs.fsyncSync(fd); // Force flush to disk
+                    fs.closeSync(fd); // Close the descriptor
+
+                    // Verify the concat file was written correctly
+                    const stats = fs.statSync(concatFile);
+                    if (stats.size === 0) {
+                        cleanupCallback();
+                        throw new Error(`Concat file is empty: ${concatFile}`);
+                    }
+
+                    // Small delay to ensure file is fully available (especially on network/slow filesystems)
+                    setTimeout(() => {
+                        // Verify file still exists before using it
+                        if (!fs.existsSync(concatFile)) {
+                            cleanupCallback();
+                            reject(new Error(`Concat file disappeared: ${concatFile}`));
+                            return;
+                        }
+
+                        ffmpeg()
+                            .input(concatFile)
+                            .inputOptions(['-f', 'concat', '-safe', '0'])
+                            .outputOptions(['-c', 'copy'])
+                            .output(outputFile)
+                            .on('end', () => {
+                                cleanupCallback(); // Clean up the temp file
+                                resolve();
+                            })
+                            .on('error', (ffmpegErr) => {
+                                console.error('FFmpeg concatenation error:', ffmpegErr);
+                                console.error('Concat file path:', concatFile);
+                                console.error('Concat file exists:', fs.existsSync(concatFile));
+                                if (fs.existsSync(concatFile)) {
+                                    console.error('Concat file contents:', fs.readFileSync(concatFile, 'utf8'));
+                                }
+                                cleanupCallback(); // Clean up the temp file
+                                reject(ffmpegErr);
+                            })
+                            .run();
+                    }, 50); // 50ms delay to ensure filesystem sync
+
+                } catch (error) {
+                    console.error('Error in concatenateAudioFiles:', error);
+                    cleanupCallback();
+                    reject(error);
+                }
+            });
         });
     }
 
@@ -506,7 +592,7 @@ class SfxMix {
                 // i: integrated loudness target in LUFS (default: -16)
                 // lra: loudness range target in LU (default: 11)
                 // tp: true peak in dBTP (configurable, typically -3dB or -0.1dB)
-                const i = options.i !== undefined ? options.i : -8;  // Target loudness
+                const i = options.i !== undefined ? options.i : -11;  // Target loudness
                 const lra = options.lra !== undefined ? options.lra : 11;  // Loudness range
                 const tp = options.tp !== undefined ? options.tp : -3;  // True peak
                 return `loudnorm=I=${i}:LRA=${lra}:TP=${tp}`;
