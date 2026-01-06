@@ -56,8 +56,6 @@ class SfxMix {
         return this;
     }
 
-
-
     convertAudio(inputFile, outputFile, outputOptions = {}) {
         return new Promise((resolve, reject) => {
             const command = ffmpeg().input(inputFile);
@@ -419,29 +417,36 @@ class SfxMix {
         return new Promise(async (resolve, reject) => {
             try {
                 // Default options for silenceremove filter
-                // start_periods: number of silence periods at start to remove (1 = remove silence from start)
-                // start_duration: minimum duration of silence to detect at start (in seconds)
-                // start_threshold: noise tolerance for start (in dB, e.g., -50dB)
-                // stop_periods: number of silence periods at end to remove (-1 = remove all silence from end)
-                // stop_duration: minimum duration of silence to detect at end (in seconds)
-                // stop_threshold: noise tolerance for end (in dB)
+                // startDuration: minimum duration of silence to detect at start (in seconds)
+                // startThreshold: noise tolerance for start (in dB, e.g., -50dB)
+                // stopDuration: minimum duration of silence to detect at end (in seconds)
+                // stopThreshold: noise tolerance for end (in dB)
                 // paddingStart: milliseconds of silence to add at the start (after removing silence)
                 // paddingEnd: milliseconds of silence to add at the end (after removing silence)
                 
-                const startPeriods = options.startPeriods !== undefined ? options.startPeriods : 1;
                 const startDuration = options.startDuration !== undefined ? options.startDuration : 0;
-                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -50;
-                const stopPeriods = options.stopPeriods !== undefined ? options.stopPeriods : -1;
+                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -40;
                 const stopDuration = options.stopDuration !== undefined ? options.stopDuration : 0;
-                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -50;
+                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -40;
                 const paddingStart = options.paddingStart || 0; // in milliseconds
                 const paddingEnd = options.paddingEnd || 0; // in milliseconds
 
                 // Build filter chain
+                // Strategy: Remove silence from start, then reverse audio, remove silence from new start (old end), then reverse back
+                // This ensures we ONLY remove silence from the beginning and end, preserving intermediate silences
                 const filters = [];
                 
-                // Add silenceremove filter
-                filters.push(`silenceremove=start_periods=${startPeriods}:start_duration=${startDuration}:start_threshold=${startThreshold}dB:stop_periods=${stopPeriods}:stop_duration=${stopDuration}:stop_threshold=${stopThreshold}dB`);
+                // Step 1: Remove silence from the start
+                filters.push(`silenceremove=start_periods=1:start_duration=${startDuration}:start_threshold=${startThreshold}dB:detection=peak`);
+                
+                // Step 2: Reverse the audio
+                filters.push('areverse');
+                
+                // Step 3: Remove silence from what is now the start (but was the end)
+                filters.push(`silenceremove=start_periods=1:start_duration=${stopDuration}:start_threshold=${stopThreshold}dB:detection=peak`);
+                
+                // Step 4: Reverse back to original direction
+                filters.push('areverse');
                 
                 // Add padding at start if specified
                 if (paddingStart > 0) {
