@@ -56,6 +56,10 @@ class SfxMix {
         return this;
     }
 
+    normalize(tp = -1.5) {
+        return this.filter('normalize', { tp });
+    }
+
     convertAudio(inputFile, outputFile, outputOptions = {}) {
         return new Promise((resolve, reject) => {
             const command = ffmpeg().input(inputFile);
@@ -498,13 +502,14 @@ class SfxMix {
     getFilterChain(filterName, options) {
         switch (filterName) {
             case 'normalize':
-                // Normalize audio using dynaudnorm filter which is more robust
-                // tp parameter is converted to target peak (p parameter, range 0-1)
-                // Default tp of -1.5 dB corresponds to approximately 0.95 peak
-                const tp = options.tp || -1.5;
-                const targetPeak = Math.pow(10, tp / 20); // Convert dB to linear scale
-                const p = Math.min(0.99, Math.max(0.5, targetPeak));
-                return `dynaudnorm=p=${p.toFixed(2)}:m=100:s=10`;
+                // Normalize audio using loudnorm filter (EBU R128)
+                // i: integrated loudness target in LUFS (default: -16)
+                // lra: loudness range target in LU (default: 11)
+                // tp: true peak in dBTP (configurable, typically -3dB or -0.1dB)
+                const i = options.i !== undefined ? options.i : -8;  // Target loudness
+                const lra = options.lra !== undefined ? options.lra : 11;  // Loudness range
+                const tp = options.tp !== undefined ? options.tp : -3;  // True peak
+                return `loudnorm=I=${i}:LRA=${lra}:TP=${tp}`;
 
             case 'telephone':
                 // Telephone effect with parameters

@@ -19,10 +19,8 @@ console.log('\nExample 2: Trimming with padding...');
 const sfx2 = new SfxMix();
 await sfx2
     .add('part1.mp3')
-    .trim({ 
-        paddingStart: 100,  // 100ms of silence at the start
-        paddingEnd: 100     // 100ms of silence at the end
-    })
+    .trim({ paddingStart: 100, paddingEnd: 100 })
+    .normalize()
     .save('part1_trimmed_padded.mp3')
     .then(() => {
         console.log('✓ Successfully exported: vo_intro_text_3_trimmed_padded.mp3');
