@@ -566,7 +566,7 @@ class SfxMix {
                 // i: integrated loudness target in LUFS (default: -16)
                 // lra: loudness range target in LU (default: 11)
                 // tp: true peak in dBTP (configurable, typically -3dB or -0.1dB)
-                const i = options.i !== undefined ? options.i : -11;  // Target loudness
+                const i = options.i !== undefined ? options.i : -16;  // Target loudness
                 const lra = options.lra !== undefined ? options.lra : 11;  // Loudness range
                 const tp = options.tp !== undefined ? options.tp : -3;  // True peak
                 return `loudnorm=I=${i}:LRA=${lra}:TP=${tp}`;
