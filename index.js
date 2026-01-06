@@ -51,6 +51,11 @@ class SfxMix {
         return this;
     }
 
+    trim(options = {}) {
+        this.actions.push({ type: 'trim', options });
+        return this;
+    }
+
 
 
     convertAudio(inputFile, outputFile, outputOptions = {}) {
@@ -161,6 +166,16 @@ class SfxMix {
                             fs.unlinkSync(this.currentFile);
                         }
                         this.currentFile = tempFile;
+                    } else if (action.type === 'trim') {
+                        if (this.currentFile == null) {
+                            throw new Error('No audio to trim. Add audio before trimming.');
+                        }
+                        const tempFile = path.join(this.TMP_DIR, `temp_trim_${uuidv4()}.mp3`);
+                        await this.applyTrim(this.currentFile, action.options, tempFile);
+                        if (this.isTempFile(this.currentFile)) {
+                            fs.unlinkSync(this.currentFile);
+                        }
+                        this.currentFile = tempFile;
                     }
                 }
                 
@@ -224,7 +239,8 @@ class SfxMix {
             filename.includes('temp_concat_') ||
             filename.includes('temp_mix_') ||
             filename.includes('temp_silence_') ||
-            filename.includes('temp_filter_')
+            filename.includes('temp_filter_') ||
+            filename.includes('temp_trim_')
         );
     }
 
@@ -374,6 +390,81 @@ class SfxMix {
                         audioInfo = await this.getAudioInfo(inputFile);
                     } catch (err) {
                         console.warn('Could not get audio info for filter, using 128k default:', err.message);
+                    }
+                    bitrateKbps = audioInfo ? Math.floor(audioInfo.bitrate / 1000) + 'k' : '128k';
+                } else {
+                    // Use configured default bitrate
+                    bitrateKbps = Math.floor(this.bitrate / 1000) + 'k';
+                }
+
+                const command = ffmpeg()
+                    .input(inputFile)
+                    .audioFilters(filterChain)
+                    .audioCodec('libmp3lame')
+                    .audioBitrate(bitrateKbps)
+                    .format('mp3')
+                    .output(outputFile);
+
+                command
+                    .on('end', () => resolve())
+                    .on('error', (err) => reject(err))
+                    .run();
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
+
+    applyTrim(inputFile, options, outputFile) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                // Default options for silenceremove filter
+                // start_periods: number of silence periods at start to remove (1 = remove silence from start)
+                // start_duration: minimum duration of silence to detect at start (in seconds)
+                // start_threshold: noise tolerance for start (in dB, e.g., -50dB)
+                // stop_periods: number of silence periods at end to remove (-1 = remove all silence from end)
+                // stop_duration: minimum duration of silence to detect at end (in seconds)
+                // stop_threshold: noise tolerance for end (in dB)
+                // paddingStart: milliseconds of silence to add at the start (after removing silence)
+                // paddingEnd: milliseconds of silence to add at the end (after removing silence)
+                
+                const startPeriods = options.startPeriods !== undefined ? options.startPeriods : 1;
+                const startDuration = options.startDuration !== undefined ? options.startDuration : 0;
+                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -50;
+                const stopPeriods = options.stopPeriods !== undefined ? options.stopPeriods : -1;
+                const stopDuration = options.stopDuration !== undefined ? options.stopDuration : 0;
+                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -50;
+                const paddingStart = options.paddingStart || 0; // in milliseconds
+                const paddingEnd = options.paddingEnd || 0; // in milliseconds
+
+                // Build filter chain
+                const filters = [];
+                
+                // Add silenceremove filter
+                filters.push(`silenceremove=start_periods=${startPeriods}:start_duration=${startDuration}:start_threshold=${startThreshold}dB:stop_periods=${stopPeriods}:stop_duration=${stopDuration}:stop_threshold=${stopThreshold}dB`);
+                
+                // Add padding at start if specified
+                if (paddingStart > 0) {
+                    filters.push(`adelay=${paddingStart}|${paddingStart}`);
+                }
+                
+                // Add padding at end if specified
+                if (paddingEnd > 0) {
+                    const paddingSec = paddingEnd / 1000;
+                    filters.push(`apad=pad_dur=${paddingSec}`);
+                }
+
+                const filterChain = filters.join(',');
+
+                let bitrateKbps;
+                
+                // If bitrate is null, auto-detect from input file
+                if (this.bitrate === null) {
+                    let audioInfo = null;
+                    try {
+                        audioInfo = await this.getAudioInfo(inputFile);
+                    } catch (err) {
+                        console.warn('Could not get audio info for trim, using 128k default:', err.message);
                     }
                     bitrateKbps = audioInfo ? Math.floor(audioInfo.bitrate / 1000) + 'k' : '128k';
                 } else {
