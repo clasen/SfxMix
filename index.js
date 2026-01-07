@@ -482,34 +482,50 @@ class SfxMix {
             try {
                 // Default options for silenceremove filter
                 // startDuration: minimum duration of silence to detect at start (in seconds)
-                // startThreshold: noise tolerance for start (in dB, e.g., -50dB)
+                // startThreshold: noise tolerance for start (in dB, e.g., -20dB)
                 // stopDuration: minimum duration of silence to detect at end (in seconds)
                 // stopThreshold: noise tolerance for end (in dB)
                 // paddingStart: milliseconds of silence to add at the start (after removing silence)
                 // paddingEnd: milliseconds of silence to add at the end (after removing silence)
                 
                 const startDuration = options.startDuration !== undefined ? options.startDuration : 0;
-                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -40;
+                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -20;
                 const stopDuration = options.stopDuration !== undefined ? options.stopDuration : 0;
-                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -40;
+                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -20;
                 const paddingStart = options.paddingStart || 0; // in milliseconds
                 const paddingEnd = options.paddingEnd || 0; // in milliseconds
+
+                let bitrateKbps;
+                let audioInfo = null;
+                
+                // If bitrate is null, auto-detect from input file
+                if (this.bitrate === null) {
+                    try {
+                        audioInfo = await this.getAudioInfo(inputFile);
+                    } catch (err) {
+                        console.warn('Could not get audio info for trim, using 128k default:', err.message);
+                    }
+                    bitrateKbps = audioInfo ? Math.floor(audioInfo.bitrate / 1000) + 'k' : '128k';
+                } else {
+                    // Use configured default bitrate
+                    bitrateKbps = Math.floor(this.bitrate / 1000) + 'k';
+                }
 
                 // Build filter chain
                 // Strategy: Remove silence from start, then reverse audio, remove silence from new start (old end), then reverse back
                 // This ensures we ONLY remove silence from the beginning and end, preserving intermediate silences
                 const filters = [];
                 
-                // Step 1: Remove silence from the start
+                // Remove silence from the start
                 filters.push(`silenceremove=start_periods=1:start_duration=${startDuration}:start_threshold=${startThreshold}dB:detection=peak`);
                 
-                // Step 2: Reverse the audio
+                // Reverse the audio
                 filters.push('areverse');
                 
-                // Step 3: Remove silence from what is now the start (but was the end)
+                // Remove silence from what is now the start (but was the end)
                 filters.push(`silenceremove=start_periods=1:start_duration=${stopDuration}:start_threshold=${stopThreshold}dB:detection=peak`);
                 
-                // Step 4: Reverse back to original direction
+                // Reverse back to original direction
                 filters.push('areverse');
                 
                 // Add padding at start if specified
@@ -523,24 +539,13 @@ class SfxMix {
                     filters.push(`apad=pad_dur=${paddingSec}`);
                 }
 
+                // CRITICAL: Resample at the end to fix "inadequate AVFrame plane padding" error
+                // This regenerates the audio frames with proper padding for the encoder
+                filters.push('aresample=async=1:min_hard_comp=0.100000:first_pts=0');
+
                 const filterChain = filters.join(',');
 
-                let bitrateKbps;
-                
-                // If bitrate is null, auto-detect from input file
-                if (this.bitrate === null) {
-                    let audioInfo = null;
-                    try {
-                        audioInfo = await this.getAudioInfo(inputFile);
-                    } catch (err) {
-                        console.warn('Could not get audio info for trim, using 128k default:', err.message);
-                    }
-                    bitrateKbps = audioInfo ? Math.floor(audioInfo.bitrate / 1000) + 'k' : '128k';
-                } else {
-                    // Use configured default bitrate
-                    bitrateKbps = Math.floor(this.bitrate / 1000) + 'k';
-                }
-
+                // Apply filters directly on input file
                 const command = ffmpeg()
                     .input(inputFile)
                     .audioFilters(filterChain)
@@ -551,7 +556,13 @@ class SfxMix {
 
                 command
                     .on('end', () => resolve())
-                    .on('error', (err) => reject(err))
+                    .on('error', (err, stdout, stderr) => {
+                        console.error('FFmpeg trim error:', err.message);
+                        if (stderr) {
+                            console.error('FFmpeg stderr:', stderr);
+                        }
+                        reject(err);
+                    })
                     .run();
             } catch (err) {
                 reject(err);
@@ -566,7 +577,7 @@ class SfxMix {
                 // i: integrated loudness target in LUFS (default: -16)
                 // lra: loudness range target in LU (default: 11)
                 // tp: true peak in dBTP (configurable, typically -3dB or -0.1dB)
-                const i = options.i !== undefined ? options.i : -16;  // Target loudness
+                const i = options.i !== undefined ? options.i : -18;  // Target loudness
                 const lra = options.lra !== undefined ? options.lra : 11;  // Loudness range
                 const tp = options.tp !== undefined ? options.tp : -3;  // True peak
                 return `loudnorm=I=${i}:LRA=${lra}:TP=${tp}`;
