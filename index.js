@@ -574,7 +574,7 @@ class SfxMix {
         switch (filterName) {
             case 'normalize':
                 // Normalize audio using loudnorm filter (EBU R128)
-                // i: integrated loudness target in LUFS (default: -16)
+                // i: integrated loudness target in LUFS (default: -18)
                 // lra: loudness range target in LU (default: 11)
                 // tp: true peak in dBTP (configurable, typically -3dB or -0.1dB)
                 const i = options.i !== undefined ? options.i : -18;  // Target loudness
