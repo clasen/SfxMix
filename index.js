@@ -494,9 +494,9 @@ class SfxMix {
                 // paddingEnd: milliseconds of silence to add at the end (after removing silence)
                 
                 const startDuration = options.startDuration !== undefined ? options.startDuration : 0;
-                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -50;
+                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -30;
                 const stopDuration = options.stopDuration !== undefined ? options.stopDuration : 0.05;
-                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -50;
+                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -30;
                 const paddingStart = options.paddingStart || 0; // in milliseconds
                 const paddingEnd = options.paddingEnd || 0; // in milliseconds
 
