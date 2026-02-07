@@ -232,14 +232,18 @@ class SfxMix {
                     }
                 } else {
                     // Save as MP3 or original format (no conversion needed)
-                    try {
-                        fs.renameSync(this.currentFile, absoluteOutput);
-                    } catch (renameErr) {
-                        // If rename fails, try to copy the file instead
-                        fs.copyFileSync(this.currentFile, absoluteOutput);
-                        if (this.isTempFile(this.currentFile)) {
+                    if (this.isTempFile(this.currentFile)) {
+                        // Temp file: move it (rename) to the output path
+                        try {
+                            fs.renameSync(this.currentFile, absoluteOutput);
+                        } catch (renameErr) {
+                            // Cross-device rename fails: copy + delete
+                            fs.copyFileSync(this.currentFile, absoluteOutput);
                             this.safeDeleteFile(this.currentFile);
                         }
+                    } else {
+                        // Original user file: always copy, never move
+                        fs.copyFileSync(this.currentFile, absoluteOutput);
                     }
                 }
 
@@ -481,17 +485,18 @@ class SfxMix {
         return new Promise(async (resolve, reject) => {
             try {
                 // Default options for silenceremove filter
-                // startDuration: minimum duration of silence to detect at start (in seconds)
-                // startThreshold: noise tolerance for start (in dB, e.g., -20dB)
-                // stopDuration: minimum duration of silence to detect at end (in seconds)
-                // stopThreshold: noise tolerance for end (in dB)
+                // startDuration: min duration of non-silence to stop trimming at start (in seconds). 0 = stop at first non-silent sample.
+                // startThreshold: noise tolerance for start (in dB, e.g., -50dB). Higher values (e.g. -20) are more aggressive.
+                // stopDuration: min duration of non-silence to stop trimming at end (in seconds).
+                //   Default 0.05s (50ms) to skip short noise artifacts/blips at the end that would prevent proper trimming.
+                // stopThreshold: noise tolerance for end (in dB, e.g., -50dB). Higher values (e.g. -20) are more aggressive.
                 // paddingStart: milliseconds of silence to add at the start (after removing silence)
                 // paddingEnd: milliseconds of silence to add at the end (after removing silence)
                 
                 const startDuration = options.startDuration !== undefined ? options.startDuration : 0;
-                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -20;
-                const stopDuration = options.stopDuration !== undefined ? options.stopDuration : 0;
-                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -20;
+                const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -50;
+                const stopDuration = options.stopDuration !== undefined ? options.stopDuration : 0.05;
+                const stopThreshold = options.stopThreshold !== undefined ? options.stopThreshold : -50;
                 const paddingStart = options.paddingStart || 0; // in milliseconds
                 const paddingEnd = options.paddingEnd || 0; // in milliseconds
 
