@@ -597,8 +597,8 @@ class SfxMix {
                 // stopDuration: min duration of non-silence to stop trimming at end (in seconds).
                 //   Default 0.05s (50ms) to skip short noise artifacts/blips at the end that would prevent proper trimming.
                 // stopThreshold: noise tolerance for end (in dB, e.g., -50dB). Higher values (e.g. -20) are more aggressive.
-                // paddingStart: milliseconds of silence to add at the start (after removing silence)
-                // paddingEnd: milliseconds of silence to add at the end (after removing silence)
+                // paddingStart: milliseconds of original audio to preserve at the start (after the silence boundary)
+                // paddingEnd: milliseconds of original audio to preserve at the end (after the silence boundary)
                 
                 const startDuration = options.startDuration !== undefined ? options.startDuration : 0;
                 const startThreshold = options.startThreshold !== undefined ? options.startThreshold : -30;
@@ -628,28 +628,19 @@ class SfxMix {
                 // This ensures we ONLY remove silence from the beginning and end, preserving intermediate silences
                 const filters = [];
                 
-                // Remove silence from the start
-                filters.push(`silenceremove=start_periods=1:start_duration=${startDuration}:start_threshold=${startThreshold}dB:detection=peak`);
+                // Remove silence from the start, preserving paddingStart ms of original audio if specified
+                const startSilenceParam = paddingStart > 0 ? `:start_silence=${paddingStart / 1000}` : '';
+                filters.push(`silenceremove=start_periods=1:start_duration=${startDuration}:start_threshold=${startThreshold}dB${startSilenceParam}:detection=peak`);
                 
                 // Reverse the audio
                 filters.push('areverse');
                 
-                // Remove silence from what is now the start (but was the end)
-                filters.push(`silenceremove=start_periods=1:start_duration=${stopDuration}:start_threshold=${stopThreshold}dB:detection=peak`);
+                // Remove silence from what is now the start (but was the end), preserving paddingEnd ms of original audio if specified
+                const endSilenceParam = paddingEnd > 0 ? `:start_silence=${paddingEnd / 1000}` : '';
+                filters.push(`silenceremove=start_periods=1:start_duration=${stopDuration}:start_threshold=${stopThreshold}dB${endSilenceParam}:detection=peak`);
                 
                 // Reverse back to original direction
                 filters.push('areverse');
-                
-                // Add padding at start if specified
-                if (paddingStart > 0) {
-                    filters.push(`adelay=${paddingStart}|${paddingStart}`);
-                }
-                
-                // Add padding at end if specified
-                if (paddingEnd > 0) {
-                    const paddingSec = paddingEnd / 1000;
-                    filters.push(`apad=pad_dur=${paddingSec}`);
-                }
 
                 // CRITICAL: Resample at the end to fix "inadequate AVFrame plane padding" error
                 // This regenerates the audio frames with proper padding for the encoder
