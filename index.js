@@ -131,77 +131,79 @@ class SfxMix {
         return this.convertAudio(inputFile, outputFile, options);
     }
 
+    async _processActions() {
+        for (let action of this.actions) {
+            if (action.type === 'add') {
+                if (this.currentFile == null) {
+                    this.currentFile = path.isAbsolute(action.input) ? action.input : path.resolve(process.cwd(), action.input);
+                } else {
+                    const tempFile = this.getTempFile('concat');
+                    await this.concatenateAudioFiles([this.currentFile, action.input], tempFile);
+                    if (this.isTempFile(this.currentFile)) {
+                        this.safeDeleteFile(this.currentFile);
+                    }
+                    this.currentFile = tempFile;
+                }
+            } else if (action.type === 'mix') {
+                if (this.currentFile == null) {
+                    throw new Error('No audio to mix with. Add or concatenate audio before mixing.');
+                }
+                const tempFile = this.getTempFile('mix');
+                await this.mixAudioFiles(this.currentFile, action.input, tempFile, action.options);
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.currentFile = tempFile;
+            } else if (action.type === 'silence') {
+                const tempSilenceFile = this.getTempFile('silence');
+                let audioInfo = null;
+                if (this.currentFile != null) {
+                    try {
+                        audioInfo = await this.getAudioInfo(this.currentFile);
+                    } catch (err) {
+                        console.warn('Could not get audio info, using defaults:', err.message);
+                    }
+                }
+                await this.generateSilence(action.duration, tempSilenceFile, audioInfo);
+                if (this.currentFile == null) {
+                    this.currentFile = tempSilenceFile;
+                } else {
+                    const tempFile = this.getTempFile('concat');
+                    await this.concatenateAudioFiles([this.currentFile, tempSilenceFile], tempFile);
+                    if (this.isTempFile(this.currentFile)) {
+                        this.safeDeleteFile(this.currentFile);
+                    }
+                    this.safeDeleteFile(tempSilenceFile);
+                    this.currentFile = tempFile;
+                }
+            } else if (action.type === 'filter') {
+                if (this.currentFile == null) {
+                    throw new Error('No audio to apply filter to. Add audio before applying filters.');
+                }
+                const tempFile = this.getTempFile('filter');
+                await this.applyFilter(this.currentFile, action.filterName, action.options, tempFile);
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.currentFile = tempFile;
+            } else if (action.type === 'trim') {
+                if (this.currentFile == null) {
+                    throw new Error('No audio to trim. Add audio before trimming.');
+                }
+                const tempFile = this.getTempFile('trim');
+                await this.applyTrim(this.currentFile, action.options, tempFile);
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.currentFile = tempFile;
+            }
+        }
+    }
+
     save(output, outputOptions = {}) {
         return new Promise(async (resolve, reject) => {
             try {
-                // Process all actions
-                for (let action of this.actions) {
-                    if (action.type === 'add') {
-                        if (this.currentFile == null) {
-                            this.currentFile = path.isAbsolute(action.input) ? action.input : path.resolve(process.cwd(), action.input);
-                        } else {
-                            const tempFile = this.getTempFile('concat');
-                            await this.concatenateAudioFiles([this.currentFile, action.input], tempFile);
-                            if (this.isTempFile(this.currentFile)) {
-                                this.safeDeleteFile(this.currentFile);
-                            }
-                            this.currentFile = tempFile;
-                        }
-                    } else if (action.type === 'mix') {
-                        if (this.currentFile == null) {
-                            throw new Error('No audio to mix with. Add or concatenate audio before mixing.');
-                        }
-                        const tempFile = this.getTempFile('mix');
-                        await this.mixAudioFiles(this.currentFile, action.input, tempFile, action.options);
-                        if (this.isTempFile(this.currentFile)) {
-                            this.safeDeleteFile(this.currentFile);
-                        }
-                        this.currentFile = tempFile;
-                    } else if (action.type === 'silence') {
-                        const tempSilenceFile = this.getTempFile('silence');
-                        // Get audio info from current file to match channels and sample rate
-                        let audioInfo = null;
-                        if (this.currentFile != null) {
-                            try {
-                                audioInfo = await this.getAudioInfo(this.currentFile);
-                            } catch (err) {
-                                console.warn('Could not get audio info, using defaults:', err.message);
-                            }
-                        }
-                        await this.generateSilence(action.duration, tempSilenceFile, audioInfo);
-                        if (this.currentFile == null) {
-                            this.currentFile = tempSilenceFile;
-                        } else {
-                            const tempFile = this.getTempFile('concat');
-                            await this.concatenateAudioFiles([this.currentFile, tempSilenceFile], tempFile);
-                            if (this.isTempFile(this.currentFile)) {
-                                this.safeDeleteFile(this.currentFile);
-                            }
-                            this.safeDeleteFile(tempSilenceFile);
-                            this.currentFile = tempFile;
-                        }
-                    } else if (action.type === 'filter') {
-                        if (this.currentFile == null) {
-                            throw new Error('No audio to apply filter to. Add audio before applying filters.');
-                        }
-                        const tempFile = this.getTempFile('filter');
-                        await this.applyFilter(this.currentFile, action.filterName, action.options, tempFile);
-                        if (this.isTempFile(this.currentFile)) {
-                            this.safeDeleteFile(this.currentFile);
-                        }
-                        this.currentFile = tempFile;
-                    } else if (action.type === 'trim') {
-                        if (this.currentFile == null) {
-                            throw new Error('No audio to trim. Add audio before trimming.');
-                        }
-                        const tempFile = this.getTempFile('trim');
-                        await this.applyTrim(this.currentFile, action.options, tempFile);
-                        if (this.isTempFile(this.currentFile)) {
-                            this.safeDeleteFile(this.currentFile);
-                        }
-                        this.currentFile = tempFile;
-                    }
-                }
+                await this._processActions();
                 
                 // Prepare output
                 const absoluteOutput = path.resolve(process.cwd(), output);
@@ -365,6 +367,111 @@ class SfxMix {
                 .on('end', () => resolve())
                 .on('error', (err) => reject(err))
                 .run();
+        });
+    }
+
+    /**
+     * Check if the current audio is truncated (doesn't end in silence).
+     * Terminal operation: processes the action chain, analyzes the tail of the
+     * resulting audio, then resets. Use after .add() like any other terminal op.
+     * 
+     * @param {Object} options - Analysis options
+     * @param {number} options.tailDuration - Milliseconds of audio tail to analyze (default: 50)
+     * @param {number} options.threshold - dB threshold; above this = truncated (default: -30)
+     * @returns {Promise<Object>} Result with truncated flag and audio metrics
+     */
+    isTruncated(options = {}) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                await this._processActions();
+
+                if (!this.currentFile) {
+                    throw new Error('No audio to analyze. Add audio before checking truncation.');
+                }
+
+                const result = await this._analyzeTail(this.currentFile, options);
+
+                // Clean up temp files
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.reset();
+                resolve(result);
+            } catch (err) {
+                if (this.currentFile && this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.reset();
+                reject(err);
+            }
+        });
+    }
+
+    _analyzeTail(filePath, options = {}) {
+        return new Promise((resolve, reject) => {
+            const tailDuration = options.tailDuration || 50;
+            const threshold = options.threshold !== undefined ? options.threshold : -30;
+            const sampleRate = 44100;
+            const tailSamples = Math.floor((tailDuration / 1000) * sampleRate);
+
+            const chunks = [];
+
+            const stream = ffmpeg(filePath)
+                .audioChannels(1)
+                .audioFrequency(sampleRate)
+                .format('s16le')
+                .on('error', err => reject(err))
+                .pipe();
+
+            stream.on('data', chunk => chunks.push(chunk));
+
+            stream.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                const allSamples = new Int16Array(
+                    buffer.buffer,
+                    buffer.byteOffset,
+                    Math.floor(buffer.length / 2)
+                );
+
+                const duration = allSamples.length / sampleRate;
+
+                if (allSamples.length === 0) {
+                    return resolve({
+                        truncated: false,
+                        tailRmsDb: -Infinity,
+                        tailPeakDb: -Infinity,
+                        duration: 0,
+                        threshold,
+                        tailDuration
+                    });
+                }
+
+                const startIdx = Math.max(0, allSamples.length - tailSamples);
+                const samples = allSamples.slice(startIdx);
+
+                let sumSquares = 0;
+                let peak = 0;
+                for (let i = 0; i < samples.length; i++) {
+                    const normalized = samples[i] / 32768;
+                    sumSquares += normalized * normalized;
+                    peak = Math.max(peak, Math.abs(normalized));
+                }
+
+                const rms = Math.sqrt(sumSquares / samples.length);
+                const rmsDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+                const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+
+                resolve({
+                    truncated: rmsDb > threshold,
+                    tailRmsDb: Math.round(rmsDb * 100) / 100,
+                    tailPeakDb: Math.round(peakDb * 100) / 100,
+                    duration: Math.round(duration * 1000) / 1000,
+                    threshold,
+                    tailDuration
+                });
+            });
+
+            stream.on('error', err => reject(err));
         });
     }
 
