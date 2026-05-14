@@ -36,7 +36,7 @@ The default chunk splitting options are:
     threshold: -35,
     silenceDuration: 0.03,
     paddingStart: 0,
-    paddingEnd: 50,
+    paddingEnd: 30,
     minDuration: 0.01
 }
 ```

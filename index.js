@@ -96,7 +96,7 @@ class SfxMix {
      * @param {number} options.threshold - Silence threshold in dB (default: -35)
      * @param {number} options.silenceDuration - Minimum silence duration in seconds (default: 0.03)
      * @param {number} options.paddingStart - Milliseconds to keep before the segment (default: 0)
-     * @param {number} options.paddingEnd - Milliseconds to keep after the segment (default: 50)
+     * @param {number} options.paddingEnd - Milliseconds to keep after the segment (default: 30)
      * @param {number} options.minDuration - Minimum segment duration in seconds (default: 0.01)
      */
     split(options = {}) {
@@ -666,7 +666,7 @@ class SfxMix {
                 const threshold = options.threshold !== undefined ? options.threshold : -35;
                 const silenceDuration = options.silenceDuration !== undefined ? options.silenceDuration : 0.03;
                 const paddingStart = options.paddingStart !== undefined ? options.paddingStart : 0; // in milliseconds
-                const paddingEnd = options.paddingEnd !== undefined ? options.paddingEnd : 50; // in milliseconds
+                const paddingEnd = options.paddingEnd !== undefined ? options.paddingEnd : 30; // in milliseconds
                 const minDuration = options.minDuration !== undefined ? options.minDuration : 0.01;
 
                 if (!Number.isInteger(chunk) || chunk < 0) {
