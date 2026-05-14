@@ -10,6 +10,7 @@
 - **Mix** audio tracks with adjustable durations.
 - **Insert silence** at any point in your audio sequence.
 - **Apply filters** like echo, normalize, highpass, lowpass, volume, equalizer, flanger, pitch, tremolo, phaser, tempo, and more.
+- **Trim detected chunks** from audio with repeated sounds separated by silence.
 - **Parameterizable filters** for fine-grained control.
 - **Fluent interface** for chaining multiple operations.
 
@@ -125,6 +126,15 @@ sfx
     .save('faster_speech.mp3');
 ```
 
+### 7. Split a Detected Sound Chunk
+
+```javascript
+sfx
+    .add('claps.wav')
+    .split({ chunk: 1 }) // Keeps the second detected sound chunk
+    .save('second_clap.wav');
+```
+
 ---
 
 ## 📖 API Documentation
@@ -137,6 +147,7 @@ sfx
 - [`mix(input, options)`](#mixinput-options)
 - [`silence(duration)`](#silenceduration)
 - [`filter(filterName, options)`](#filterfiltername-options)
+- [`split(options)`](#splitoptions)
 - [`save(output)`](#saveoutput)
 
 ---
@@ -214,6 +225,31 @@ Applies an audio filter to the current audio.
 - [`tremolo`](#filter-tremolo)
 - [`phaser`](#filter-phaser)
 - [`tempo`](#filter-tempo)
+
+---
+
+### `split(options)`
+
+Splits the current audio by silence and keeps one detected non-silent chunk. This is useful for files that contain repeated sounds separated by silence, such as claps, bass hits, or one-shots.
+
+- **Parameters:**
+  - `options` (object): (Optional) Chunk detection and trimming options.
+    - `chunk` (number): Zero-based chunk index to keep. Default is `0`.
+    - `threshold` (number): Silence threshold in dB. Default is `-35`.
+    - `silenceDuration` (number): Minimum silence duration in seconds. Default is `0.03`.
+    - `paddingStart` (number): Milliseconds to keep before the detected chunk. Default is `0`.
+    - `paddingEnd` (number): Milliseconds to keep after the detected chunk. Default is `50`.
+    - `minDuration` (number): Minimum chunk duration in seconds. Default is `0.01`.
+- **Returns:** `SfxMix` (for chaining)
+
+**Example:**
+
+```javascript
+sfx
+    .add('claps.wav')
+    .split({ chunk: 1 })
+    .save('second_clap.wav');
+```
 
 ---
 
@@ -438,7 +474,7 @@ sfx.filter('tempo', { x: 1.25 }); // Increase tempo by 25%
 
 - **FFmpeg Installation:** Ensure FFmpeg is installed and accessible in your system's PATH.
 - **File Permissions:** The module creates and deletes temporary files during processing. Ensure the application has the necessary permissions.
-- **Audio Formats:** The module assumes input files are in MP3 format. For other formats, adjust codec and format settings accordingly.
+- **Audio Formats:** The module can process formats supported by FFmpeg. Intermediate processing uses WAV PCM to avoid unnecessary lossy compression; final encoding is selected by the output extension.
 - **Error Handling:** Always handle rejections from the `save()` method to catch any processing errors.
 
 ---
