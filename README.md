@@ -38,6 +38,12 @@ Before installing **SfxMix**, ensure that **FFmpeg** is installed and accessible
 npm install sfxmix
 ```
 
+### Install SfxMix skill
+
+```bash
+npx skills add https://github.com/clasen/sfxmix --skill sfxmix
+```
+
 ---
 
 ## 📝 Usage
