@@ -1,5 +1,5 @@
 ---
-name: sfxmix-audio-processing
+name: sfxmix
 description: Guidance for working on the SfxMix audio processing library. Use when modifying SfxMix APIs, FFmpeg processing steps, demo audio scripts, chunk splitting, silence detection, or README examples for this project.
 ---
 
