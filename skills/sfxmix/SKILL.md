@@ -56,6 +56,8 @@ Use `README.md` as the user-facing source for API examples and docs. When changi
 - `filter(filterName, options = {})`: Queues a named FFmpeg audio filter. Returns `this`.
 - `trim(options = {})`: Queues leading/trailing silence trimming while preserving internal silence. Defaults: `startDuration: 0`, `startThreshold: -30`, `stopDuration: 0.05`, `stopThreshold: -30`, `paddingStart: 0`, `paddingEnd: 0`. Returns `this`.
 - `split(options = {})`: Queues extraction of one silence-detected non-silent chunk. Defaults are listed above. Returns `this`.
+- `keep(segments, options = {})`: Queues retention of arbitrary `{ start, end }` ranges in seconds. Discards audio outside those ranges. Options: `joinPadMs` (default `0`), `fadeMs` (default `0`). Segments must not overlap; order in the input array does not matter. Returns `this`.
+- `cut(segments, options = {})`: Queues removal of arbitrary `{ start, end }` ranges in seconds, keeping the complement. Options mirror `keep`: `joinPadMs` (default `0`), `fadeMs` (default `0`). Segments must not overlap; order in the input array does not matter. Returns `this`.
 - `normalize(tp = -1.5)`: Convenience wrapper for `filter('normalize', { tp })`. Returns `this`.
 - `save(output, outputOptions = {})`: Processes queued actions, writes the final output, resets the instance, and resolves with the absolute output path. Custom `outputOptions` are passed to `convertAudio()`.
 - `isTruncated(options = {})`: Terminal analysis operation. Processes queued actions, checks whether the audio tail is above `options.threshold`, resets the instance, and resolves `{ truncated, tailRmsDb, tailPeakDb, duration, threshold, tailDuration }`. Defaults: `tailDuration: 50`, `threshold: -30`.
@@ -86,7 +88,7 @@ Use `README.md` as the user-facing source for API examples and docs. When changi
 - `getTempFile(prefix, extension = 'wav')`: Builds unique temp file paths inside the instance temp directory.
 - `applyIntermediateOutput(command, outputFile)`: Forces intermediate FFmpeg output to WAV PCM.
 - `cleanup()`: Removes the instance temp directory.
-- `_processActions()`: Runs queued `add`, `mix`, `silence`, `filter`, `trim`, and `split` actions in order.
+- `_processActions()`: Runs queued `add`, `mix`, `silence`, `filter`, `trim`, `split`, `keep`, and `cut` actions in order.
 - `safeDeleteFile(filePath, maxRetries = 3)`: Deletes temp files with retry backoff.
 - `isTempFile(filename)`: Checks whether a path belongs to the instance temp directory.
 - `concatenateAudioFiles(inputFiles, outputFile)`: Concatenates files with FFmpeg's `concat` filter.
@@ -97,6 +99,10 @@ Use `README.md` as the user-facing source for API examples and docs. When changi
 - `applyFilter(inputFile, filterName, options, outputFile)`: Resolves a filter chain and writes a filtered intermediate WAV.
 - `applyTrim(inputFile, options, outputFile)`: Applies leading/trailing silence removal.
 - `applySplit(inputFile, options, outputFile)`: Detects silence boundaries and extracts the requested chunk.
+- `validateKeepSegments(inputFile, segments)`: Validates keep ranges and returns sorted segments.
+- `applyKeep(inputFile, segments, options, outputFile)`: Extracts and concatenates kept ranges via FFmpeg `atrim`/`concat`.
+- `getComplementSegments(orderedRanges, duration)`: Builds the complement of sorted cut ranges.
+- `applyCut(inputFile, segments, options, outputFile)`: Converts cut ranges to keep ranges and delegates processing to `applyKeep`.
 - `getAudioDuration(inputFile)`: Reads duration through `ffprobe`.
 - `parseSilenceEvent(line)`: Parses FFmpeg `silencedetect` stderr lines.
 - `detectSilence(inputFile, options = {})`: Runs `silencedetect` and returns ordered silence events.

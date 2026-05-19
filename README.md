@@ -11,6 +11,7 @@
 - **Insert silence** at any point in your audio sequence.
 - **Apply filters** like echo, normalize, highpass, lowpass, volume, equalizer, flanger, pitch, tremolo, phaser, tempo, and more.
 - **Trim detected chunks** from audio with repeated sounds separated by silence.
+- **Keep or cut arbitrary time ranges** from an existing audio file.
 - **Parameterizable filters** for fine-grained control.
 - **Fluent interface** for chaining multiple operations.
 
@@ -141,6 +142,31 @@ sfx
     .save('second_clap.wav');
 ```
 
+### 8. Keep Arbitrary Time Ranges
+
+```javascript
+sfx
+    .add('input.wav')
+    .keep([
+        { start: 0.0, end: 12.34 },
+        { start: 18.10, end: 25.00 },
+        { start: 40.50, end: 55.20 }
+    ], { joinPadMs: 0, fadeMs: 0 })
+    .save('output.wav');
+```
+
+### 9. Cut Arbitrary Time Ranges
+
+```javascript
+sfx
+    .add('input.wav')
+    .cut([
+        { start: 12.34, end: 18.10 },
+        { start: 25.00, end: 40.50 }
+    ], { joinPadMs: 0, fadeMs: 0 })
+    .save('output.wav');
+```
+
 ---
 
 ## 📖 API Documentation
@@ -154,6 +180,8 @@ sfx
 - [`silence(duration)`](#silenceduration)
 - [`filter(filterName, options)`](#filterfiltername-options)
 - [`split(options)`](#splitoptions)
+- [`keep(segments, options)`](#keepsegments-options)
+- [`cut(segments, options)`](#cutsegments-options)
 - [`save(output)`](#saveoutput)
 
 ---
@@ -255,6 +283,69 @@ sfx
     .add('claps.wav')
     .split({ chunk: 1 })
     .save('second_clap.wav');
+```
+
+---
+
+### `keep(segments, options)`
+
+Keeps one or more arbitrary time ranges from the current audio and discards everything else. Segments may be passed in any order; they are sorted by `start` before concatenation.
+
+- **Parameters:**
+  - `segments` (array): Non-empty array of `{ start, end }` objects in seconds (float).
+  - `options` (object): (Optional) Join and fade options.
+    - `joinPadMs` (number): Silence inserted between kept segments in milliseconds. Default is `0`.
+    - `fadeMs` (number): Fade in/out applied to each kept segment in milliseconds. Default is `0`.
+- **Returns:** `SfxMix` (for chaining)
+
+**Validation:**
+
+- Each segment must satisfy `0 <= start < end <= duration`.
+- Segments must not overlap.
+- `end` values beyond the file duration throw immediately (no silent clamping).
+
+**Example:**
+
+```javascript
+sfx
+    .add('input.wav')
+    .keep([
+        { start: 0.0, end: 12.34 },
+        { start: 18.10, end: 25.00 }
+    ], { joinPadMs: 100, fadeMs: 20 })
+    .save('output.wav');
+```
+
+---
+
+### `cut(segments, options)`
+
+Cuts one or more arbitrary time ranges from the current audio and keeps everything else.
+
+- **Parameters:**
+  - `segments` (array): Non-empty array of `{ start, end }` objects in seconds (float) to remove.
+  - `options` (object): (Optional) Same join/fade options used by `keep()`.
+    - `joinPadMs` (number): Silence inserted between resulting kept segments in milliseconds. Default is `0`.
+    - `fadeMs` (number): Fade in/out applied to each resulting kept segment in milliseconds. Default is `0`.
+- **Returns:** `SfxMix` (for chaining)
+
+**Validation:**
+
+- Each segment must satisfy `0 <= start < end <= duration`.
+- Segments must not overlap.
+- `end` values beyond the file duration throw immediately (no silent clamping).
+- Removing the full file throws (empty output is rejected).
+
+**Example:**
+
+```javascript
+sfx
+    .add('input.wav')
+    .cut([
+        { start: 12.34, end: 18.10 },
+        { start: 25.00, end: 40.50 }
+    ], { joinPadMs: 100, fadeMs: 20 })
+    .save('output.wav');
 ```
 
 ---

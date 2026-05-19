@@ -104,6 +104,38 @@ class SfxMix {
         return this;
     }
 
+    /**
+     * Keep arbitrary time ranges from the current audio and discard the rest.
+     *
+     * @param {Array<{start: number, end: number}>} segments - Ranges in seconds (float)
+     * @param {Object} [options]
+     * @param {number} [options.joinPadMs=0] - Silence between kept segments in milliseconds
+     * @param {number} [options.fadeMs=0] - Fade in/out per segment in milliseconds
+     */
+    keep(segments, options = {}) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+            throw new Error('keep() requires a non-empty array of { start, end } segments.');
+        }
+        this.actions.push({ type: 'keep', segments, options });
+        return this;
+    }
+
+    /**
+     * Remove arbitrary time ranges from the current audio and keep the rest.
+     *
+     * @param {Array<{start: number, end: number}>} segments - Ranges in seconds (float) to remove
+     * @param {Object} [options]
+     * @param {number} [options.joinPadMs=0] - Silence between kept segments in milliseconds
+     * @param {number} [options.fadeMs=0] - Fade in/out per kept segment in milliseconds
+     */
+    cut(segments, options = {}) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+            throw new Error('cut() requires a non-empty array of { start, end } segments.');
+        }
+        this.actions.push({ type: 'cut', segments, options });
+        return this;
+    }
+
     normalize(tp = -1.5) {
         return this.filter('normalize', { tp });
     }
@@ -231,6 +263,26 @@ class SfxMix {
                 }
                 const tempFile = this.getTempFile('split');
                 await this.applySplit(this.currentFile, action.options, tempFile);
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.currentFile = tempFile;
+            } else if (action.type === 'keep') {
+                if (this.currentFile == null) {
+                    throw new Error('No audio to keep segments from. Add audio before calling keep().');
+                }
+                const tempFile = this.getTempFile('keep');
+                await this.applyKeep(this.currentFile, action.segments, action.options, tempFile);
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.currentFile = tempFile;
+            } else if (action.type === 'cut') {
+                if (this.currentFile == null) {
+                    throw new Error('No audio to cut segments from. Add audio before calling cut().');
+                }
+                const tempFile = this.getTempFile('cut');
+                await this.applyCut(this.currentFile, action.segments, action.options, tempFile);
                 if (this.isTempFile(this.currentFile)) {
                     this.safeDeleteFile(this.currentFile);
                 }
@@ -653,6 +705,180 @@ class SfxMix {
                         reject(err);
                     })
                     .run();
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
+
+    async validateKeepSegments(inputFile, segments) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+            throw new Error('keep() requires a non-empty array of { start, end } segments.');
+        }
+
+        const duration = await this.getAudioDuration(inputFile);
+        const normalized = segments.map((seg, index) => {
+            const start = Number(seg?.start);
+            const end = Number(seg?.end);
+
+            if (!Number.isFinite(start) || !Number.isFinite(end)) {
+                throw new Error(`keep() segment at index ${index} must have numeric start and end.`);
+            }
+            if (start < 0 || end <= start || end > duration) {
+                throw new Error(
+                    `keep() segment at index ${index} is out of range: start=${start}, end=${end}, duration=${duration}.`
+                );
+            }
+
+            return { start, end };
+        });
+
+        const ordered = [...normalized].sort((a, b) => a.start - b.start);
+        for (let i = 1; i < ordered.length; i++) {
+            if (ordered[i].start < ordered[i - 1].end) {
+                throw new Error('keep() segments must not overlap.');
+            }
+        }
+
+        return { duration, ordered };
+    }
+
+    applyKeep(inputFile, segments, options, outputFile) {
+        return new Promise(async (resolve, reject) => {
+            let silencePadFile = null;
+
+            try {
+                const { joinPadMs = 0, fadeMs = 0 } = options;
+                const { ordered } = await this.validateKeepSegments(inputFile, segments);
+                const fadeSec = fadeMs / 1000;
+
+                const segmentFilter = (seg, label, inputLabel = '[0:a]') => {
+                    const dur = seg.end - seg.start;
+                    const fadeOutStart = Math.max(0, dur - fadeSec);
+                    const fade = fadeMs > 0
+                        ? `,afade=t=in:st=0:d=${fadeSec},afade=t=out:st=${fadeOutStart}:d=${fadeSec}`
+                        : '';
+                    return `${inputLabel}atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS${fade}${label}`;
+                };
+
+                if (ordered.length === 1) {
+                    const seg = ordered[0];
+                    const dur = seg.end - seg.start;
+                    const fadeOutStart = Math.max(0, dur - fadeSec);
+                    const filters = [
+                        `atrim=start=${seg.start}:end=${seg.end}`,
+                        'asetpts=PTS-STARTPTS'
+                    ];
+                    if (fadeMs > 0) {
+                        filters.push(
+                            `afade=t=in:st=0:d=${fadeSec}`,
+                            `afade=t=out:st=${fadeOutStart}:d=${fadeSec}`
+                        );
+                    }
+
+                    this.applyIntermediateOutput(
+                        ffmpeg(inputFile).audioFilters(filters),
+                        outputFile
+                    )
+                        .on('end', () => resolve())
+                        .on('error', (err) => reject(err))
+                        .run();
+                    return;
+                }
+
+                const command = ffmpeg().input(inputFile);
+                const filters = [];
+                const concatInputs = [];
+
+                if (joinPadMs > 0) {
+                    silencePadFile = path.join(
+                        path.dirname(outputFile),
+                        `_keep_pad_${Date.now()}_${process.pid}.wav`
+                    );
+                    const audioInfo = await this.getAudioInfo(inputFile);
+                    await this.generateSilence(joinPadMs, silencePadFile, audioInfo);
+                    command.input(silencePadFile);
+
+                    const padCount = ordered.length - 1;
+                    if (padCount === 1) {
+                        filters.push('[1:a]asetpts=PTS-STARTPTS[pad0]');
+                    } else {
+                        const padLabels = Array.from({ length: padCount }, (_, i) => `[pad${i}]`).join('');
+                        filters.push(`[1:a]asetpts=PTS-STARTPTS[padbase];[padbase]asplit=${padCount}${padLabels}`);
+                    }
+                }
+
+                ordered.forEach((seg, i) => {
+                    const label = `[a${i}]`;
+                    filters.push(segmentFilter(seg, label));
+                    concatInputs.push(label);
+                    if (joinPadMs > 0 && i < ordered.length - 1) {
+                        concatInputs.push(`[pad${ordered.length > 2 ? i : 0}]`);
+                    }
+                });
+
+                filters.push(
+                    `${concatInputs.join('')}concat=n=${concatInputs.length}:v=0:a=1[out]`
+                );
+
+                const cleanupPad = () => {
+                    if (silencePadFile) {
+                        this.safeDeleteFile(silencePadFile);
+                    }
+                };
+
+                this.applyIntermediateOutput(
+                    command.complexFilter(filters.join(';'), 'out'),
+                    outputFile
+                )
+                    .on('end', () => {
+                        cleanupPad();
+                        resolve();
+                    })
+                    .on('error', (err) => {
+                        cleanupPad();
+                        reject(err);
+                    })
+                    .run();
+            } catch (err) {
+                if (silencePadFile) {
+                    this.safeDeleteFile(silencePadFile);
+                }
+                reject(err);
+            }
+        });
+    }
+
+    getComplementSegments(orderedRanges, duration) {
+        const complement = [];
+        let cursor = 0;
+
+        for (const range of orderedRanges) {
+            if (range.start > cursor) {
+                complement.push({ start: cursor, end: range.start });
+            }
+            cursor = range.end;
+        }
+
+        if (cursor < duration) {
+            complement.push({ start: cursor, end: duration });
+        }
+
+        return complement;
+    }
+
+    applyCut(inputFile, segments, options, outputFile) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                const { duration, ordered } = await this.validateKeepSegments(inputFile, segments);
+                const keepSegments = this.getComplementSegments(ordered, duration);
+
+                if (keepSegments.length === 0) {
+                    throw new Error('cut() removes the full file; resulting audio would be empty.');
+                }
+
+                await this.applyKeep(inputFile, keepSegments, options, outputFile);
+                resolve();
             } catch (err) {
                 reject(err);
             }
