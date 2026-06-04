@@ -51,6 +51,33 @@ function readPcmSamples(filePath) {
     });
 }
 
+function getMaxVolume(filePath) {
+    return new Promise((resolve, reject) => {
+        let maxVolume = null;
+
+        ffmpeg(filePath)
+            .noVideo()
+            .audioFilters('volumedetect')
+            .format('null')
+            .output(process.platform === 'win32' ? 'NUL' : '/dev/null')
+            .on('stderr', (line) => {
+                const match = line.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
+                if (match) {
+                    maxVolume = match[1] === '-inf' ? -Infinity : Number(match[1]);
+                }
+            })
+            .on('end', () => {
+                if (!Number.isFinite(maxVolume)) {
+                    reject(new Error(`Could not measure max volume for ${filePath}`));
+                    return;
+                }
+                resolve(maxVolume);
+            })
+            .on('error', reject)
+            .run();
+    });
+}
+
 before(async () => {
     fs.mkdirSync(OUT_DIR, { recursive: true });
     if (!fs.existsSync(INPUT_3S)) {
@@ -114,6 +141,16 @@ test('fadeMs lowers edge samples relative to interior peak', async () => {
     const edgePeak = Math.max(peak(samples.slice(0, 50)), peak(samples.slice(-50)));
     const interiorPeak = peak(samples.slice(200, samples.length - 200));
     assert.ok(edgePeak < interiorPeak, `edge peak ${edgePeak} should be below interior peak ${interiorPeak}`);
+});
+
+test('peakNormalize raises sample peak to target dB', async () => {
+    const output = path.join(OUT_DIR, 'peak_normalized.wav');
+    const targetDb = -3;
+
+    await new SfxMix().add(INPUT_3S).peakNormalize(targetDb).save(output);
+
+    const maxVolume = await getMaxVolume(output);
+    assert.ok(Math.abs(maxVolume - targetDb) < 0.2, `expected peak near ${targetDb} dB, got ${maxVolume} dB`);
 });
 
 test('overlapping segments throw', async () => {

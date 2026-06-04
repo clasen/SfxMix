@@ -9,7 +9,7 @@
 - **Concatenate** multiple audio files seamlessly.
 - **Mix** audio tracks with adjustable durations.
 - **Insert silence** at any point in your audio sequence.
-- **Apply filters** like echo, normalize, highpass, lowpass, volume, equalizer, flanger, pitch, tremolo, phaser, tempo, and more.
+- **Apply filters** like echo, normalize, peak normalize, highpass, lowpass, volume, equalizer, flanger, pitch, tremolo, phaser, tempo, and more.
 - **Trim detected chunks** from audio with repeated sounds separated by silence.
 - **Keep or cut arbitrary time ranges** from an existing audio file.
 - **Parameterizable filters** for fine-grained control.
@@ -182,6 +182,7 @@ sfx
 - [`split(options)`](#splitoptions)
 - [`keep(segments, options)`](#keepsegments-options)
 - [`cut(segments, options)`](#cutsegments-options)
+- [`peakNormalize(targetDb)`](#peaknormalizetargetdb)
 - [`save(output)`](#saveoutput)
 
 ---
@@ -350,6 +351,26 @@ sfx
 
 ---
 
+### `peakNormalize(targetDb)`
+
+Adjusts the whole audio gain so the maximum sample peak reaches the requested dBFS target.
+This is useful for sound effects and one-shots where you want the waveform peak near a ceiling such as `-3 dB`.
+
+- **Parameters:**
+  - `targetDb` (number): Target maximum sample peak in dBFS. Must be `<= 0`. Default is `-3`.
+- **Returns:** `SfxMix` (for chaining)
+
+**Example:**
+
+```javascript
+sfx
+    .add('input.mp3')
+    .peakNormalize()
+    .save('output.mp3');
+```
+
+---
+
 ### `save(output)`
 
 Processes the audio according to the specified actions and saves the result.
@@ -370,7 +391,7 @@ sfx.save('output.mp3');
 
 ### Filter: `normalize`
 
-Normalizes audio loudness to a specified target using the EBU R128 standard.
+Normalizes audio loudness to a specified target using the EBU R128 standard. This targets integrated loudness, not the maximum visible waveform peak. Use [`peakNormalize(targetDb)`](#peaknormalizetargetdb) when you want the loudest sample peak to reach a specific dBFS ceiling.
 
 - **Options:**
   - `tp` (number): Maximum true peak level in dBTP (default: `-1.5`).

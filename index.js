@@ -140,6 +140,18 @@ class SfxMix {
         return this.filter('normalize', { tp });
     }
 
+    peakNormalize(targetDb = -3) {
+        const normalizedTarget = Number(targetDb);
+        if (!Number.isFinite(normalizedTarget)) {
+            throw new Error('peakNormalize() targetDb must be a finite number.');
+        }
+        if (normalizedTarget > 0) {
+            throw new Error('peakNormalize() targetDb must be less than or equal to 0 dBFS.');
+        }
+        this.actions.push({ type: 'peakNormalize', targetDb: normalizedTarget });
+        return this;
+    }
+
     convertAudio(inputFile, outputFile, outputOptions = {}) {
         return new Promise((resolve, reject) => {
             const command = ffmpeg().input(inputFile);
@@ -243,6 +255,16 @@ class SfxMix {
                 }
                 const tempFile = this.getTempFile('filter');
                 await this.applyFilter(this.currentFile, action.filterName, action.options, tempFile);
+                if (this.isTempFile(this.currentFile)) {
+                    this.safeDeleteFile(this.currentFile);
+                }
+                this.currentFile = tempFile;
+            } else if (action.type === 'peakNormalize') {
+                if (this.currentFile == null) {
+                    throw new Error('No audio to peak-normalize. Add audio before calling peakNormalize().');
+                }
+                const tempFile = this.getTempFile('peak_normalize');
+                await this.applyPeakNormalize(this.currentFile, action.targetDb, tempFile);
                 if (this.isTempFile(this.currentFile)) {
                     this.safeDeleteFile(this.currentFile);
                 }
@@ -643,6 +665,49 @@ class SfxMix {
             } catch (err) {
                 reject(err);
             }
+        });
+    }
+
+    getMaxVolume(inputFile) {
+        return new Promise((resolve, reject) => {
+            let maxVolume = null;
+
+            ffmpeg(inputFile)
+                .noVideo()
+                .audioFilters('volumedetect')
+                .format('null')
+                .output(NULL_OUTPUT)
+                .on('stderr', (line) => {
+                    const match = line.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
+                    if (match) {
+                        maxVolume = match[1] === '-inf' ? -Infinity : Number(match[1]);
+                    }
+                })
+                .on('end', () => {
+                    if (!Number.isFinite(maxVolume)) {
+                        reject(new Error(`Could not measure peak volume for ${inputFile}.`));
+                        return;
+                    }
+                    resolve(maxVolume);
+                })
+                .on('error', reject)
+                .run();
+        });
+    }
+
+    async applyPeakNormalize(inputFile, targetDb, outputFile) {
+        const maxVolume = await this.getMaxVolume(inputFile);
+        const gainDb = targetDb - maxVolume;
+        const gainFilter = `volume=${gainDb.toFixed(6)}dB`;
+
+        return new Promise((resolve, reject) => {
+            this.applyIntermediateOutput(
+                ffmpeg(inputFile).audioFilters(gainFilter),
+                outputFile
+            )
+                .on('end', () => resolve())
+                .on('error', (err) => reject(err))
+                .run();
         });
     }
 

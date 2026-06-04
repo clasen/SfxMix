@@ -59,6 +59,7 @@ Use `README.md` as the user-facing source for API examples and docs. When changi
 - `keep(segments, options = {})`: Queues retention of arbitrary `{ start, end }` ranges in seconds. Discards audio outside those ranges. Options: `joinPadMs` (default `0`), `fadeMs` (default `0`). Segments must not overlap; order in the input array does not matter. Returns `this`.
 - `cut(segments, options = {})`: Queues removal of arbitrary `{ start, end }` ranges in seconds, keeping the complement. Options mirror `keep`: `joinPadMs` (default `0`), `fadeMs` (default `0`). Segments must not overlap; order in the input array does not matter. Returns `this`.
 - `normalize(tp = -1.5)`: Convenience wrapper for `filter('normalize', { tp })`. Returns `this`.
+- `peakNormalize(targetDb = -3)`: Queues sample peak normalization to a dBFS ceiling. Measures `max_volume` with FFmpeg `volumedetect`, then applies calculated gain with the `volume` filter. Returns `this`.
 - `save(output, outputOptions = {})`: Processes queued actions, writes the final output, resets the instance, and resolves with the absolute output path. Custom `outputOptions` are passed to `convertAudio()`.
 - `isTruncated(options = {})`: Terminal analysis operation. Processes queued actions, checks whether the audio tail is above `options.threshold`, resets the instance, and resolves `{ truncated, tailRmsDb, tailPeakDb, duration, threshold, tailDuration }`. Defaults: `tailDuration: 50`, `threshold: -30`.
 - `reset()`: Clears queued actions and current file state. Returns `this`.
@@ -97,6 +98,8 @@ Use `README.md` as the user-facing source for API examples and docs. When changi
 - `getAudioInfo(inputFile)`: Reads channel count, sample rate, and bitrate through `ffprobe`.
 - `generateSilence(durationMs, outputFile, audioInfo = null)`: Generates PCM silence matching provided audio metadata when available.
 - `applyFilter(inputFile, filterName, options, outputFile)`: Resolves a filter chain and writes a filtered intermediate WAV.
+- `getMaxVolume(inputFile)`: Measures sample peak dBFS using FFmpeg `volumedetect`.
+- `applyPeakNormalize(inputFile, targetDb, outputFile)`: Applies calculated dB gain so the measured sample peak reaches `targetDb`.
 - `applyTrim(inputFile, options, outputFile)`: Applies leading/trailing silence removal.
 - `applySplit(inputFile, options, outputFile)`: Detects silence boundaries and extracts the requested chunk.
 - `validateKeepSegments(inputFile, segments)`: Validates keep ranges and returns sorted segments.
