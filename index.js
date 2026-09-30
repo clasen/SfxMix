@@ -6,6 +6,40 @@ const { Readable } = require('stream');
 
 const NULL_OUTPUT = process.platform === 'win32' ? 'NUL' : '/dev/null';
 
+// Temp directories of every live instance. Holding paths instead of instances
+// lets instances be garbage collected; one set of process listeners serves all.
+const liveTempDirs = new Set();
+let processHandlersInstalled = false;
+
+function removeAllTempDirs() {
+    for (const dir of liveTempDirs) {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        } catch (err) {
+            console.warn('Error cleaning up temp directory:', err.message);
+        }
+    }
+    liveTempDirs.clear();
+}
+
+function onTerminationSignal(signal) {
+    // The app owns shutdown when it listens for the signal too; the 'exit'
+    // listener cleans up once it ends the process.
+    if (process.listenerCount(signal) > 1) return;
+    removeAllTempDirs();
+    process.removeListener('SIGINT', onTerminationSignal);
+    process.removeListener('SIGTERM', onTerminationSignal);
+    process.kill(process.pid, signal);
+}
+
+function installProcessHandlers() {
+    if (processHandlersInstalled) return;
+    processHandlersInstalled = true;
+    process.on('exit', removeAllTempDirs);
+    process.on('SIGINT', onTerminationSignal);
+    process.on('SIGTERM', onTerminationSignal);
+}
+
 class SfxMix {
     constructor(config = {}) {
         this.actions = [];
@@ -24,17 +58,8 @@ class SfxMix {
             throw new Error('Unable to create temporary directory');
         }
         
-        // Setup cleanup handlers
-        this.cleanupHandler = () => this.cleanup();
-        process.on('exit', this.cleanupHandler);
-        process.on('SIGINT', () => {
-            this.cleanup();
-            process.exit();
-        });
-        process.on('SIGTERM', () => {
-            this.cleanup();
-            process.exit();
-        });
+        liveTempDirs.add(this.TMP_DIR);
+        installProcessHandlers();
     }
     
     getTempFile(prefix, extension = 'wav') {
@@ -57,6 +82,7 @@ class SfxMix {
         } catch (err) {
             console.warn('Error cleaning up temp directory:', err.message);
         }
+        liveTempDirs.delete(this.TMP_DIR);
     }
 
     add(input) {
