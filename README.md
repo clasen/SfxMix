@@ -21,6 +21,8 @@
 
 Before installing **SfxMix**, ensure that **FFmpeg** is installed and accessible in your system's PATH.
 
+To use binaries outside your PATH, set the `FFMPEG_PATH` and `FFPROBE_PATH` environment variables.
+
 ### Install FFmpeg
 
 - **macOS:** Install via Homebrew
@@ -606,7 +608,6 @@ If you encounter any issues or have questions, please open an issue on the [GitH
 ## 📚 References
 
 - [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
-- [fluent-ffmpeg GitHub](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg)
 - [EBU R128 Loudness Recommendation](https://tech.ebu.ch/docs/r/r128.pdf)
 
 ---

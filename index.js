@@ -1,10 +1,58 @@
-const ffmpeg = require('fluent-ffmpeg');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { Readable } = require('stream');
 
 const NULL_OUTPUT = process.platform === 'win32' ? 'NUL' : '/dev/null';
+const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
+const FFPROBE_BIN = process.env.FFPROBE_PATH || 'ffprobe';
+const ERROR_TAIL_LINES = 10;
+
+// Runs a binary to completion and resolves with its stdout and stderr.
+// A non-zero exit rejects with the tail of stderr, where ffmpeg explains why.
+function runBinary(bin, args, stdin = null) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(bin, args, { stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+        const stdout = [];
+        const stderr = [];
+
+        child.stdout.on('data', (chunk) => stdout.push(chunk));
+        child.stderr.on('data', (chunk) => stderr.push(chunk));
+        child.on('error', reject);
+        child.on('close', (code, signal) => {
+            const stderrText = Buffer.concat(stderr).toString();
+            if (code === 0) {
+                resolve({ stdout: Buffer.concat(stdout), stderr: stderrText });
+                return;
+            }
+            const reason = signal ? `signal ${signal}` : `code ${code}`;
+            const tail = stderrText.trim().split(/\r?\n/).slice(-ERROR_TAIL_LINES).join('\n');
+            reject(new Error(`${bin} exited with ${reason}: ${tail}`));
+        });
+
+        if (stdin) {
+            child.stdin.on('error', reject);
+            stdin.on('error', reject);
+            stdin.pipe(child.stdin);
+        }
+    });
+}
+
+function runFfmpeg(args, stdin) {
+    return runBinary(FFMPEG_BIN, ['-hide_banner', '-nostats', '-y', ...args], stdin);
+}
+
+async function probeAudio(inputFile) {
+    const { stdout } = await runBinary(FFPROBE_BIN, [
+        '-v', 'error',
+        '-show_streams',
+        '-show_format',
+        '-of', 'json',
+        inputFile
+    ]);
+    return JSON.parse(stdout);
+}
 
 // Temp directories of every live instance. Holding paths instead of instances
 // lets instances be garbage collected; one set of process listeners serves all.
@@ -67,11 +115,8 @@ class SfxMix {
         return path.join(this.TMP_DIR, `${prefix}_${++this.tempCounter}.${normalizedExtension}`);
     }
 
-    applyIntermediateOutput(command, outputFile) {
-        return command
-            .audioCodec('pcm_s16le')
-            .format('wav')
-            .output(outputFile);
+    renderWav(args, outputFile) {
+        return runFfmpeg([...args, '-acodec', 'pcm_s16le', '-f', 'wav', outputFile]);
     }
     
     cleanup() {
@@ -178,51 +223,42 @@ class SfxMix {
         return this;
     }
 
-    convertAudio(inputFile, outputFile, outputOptions = {}) {
-        return new Promise((resolve, reject) => {
-            const command = ffmpeg().input(inputFile);
-            
-            // Apply custom output options if provided
-            if (Object.keys(outputOptions).length > 0) {
-                // Convert object to array format for FFmpeg
-                const optionsArray = [];
-                for (const [key, value] of Object.entries(outputOptions)) {
-                    optionsArray.push(`-${key}`, value);
-                }
-                command.outputOptions(optionsArray);
-            } else {
-                // Auto-detect format and apply defaults based on file extension
-                const ext = path.extname(outputFile).toLowerCase();
-                switch (ext) {
-                    case '.ogg':
-                        command.audioCodec('libopus').format('ogg');
-                        break;
-                    case '.wav':
-                        command.audioCodec('pcm_s16le').format('wav');
-                        break;
-                    case '.flac':
-                        command.audioCodec('flac').format('flac');
-                        break;
-                    case '.aac':
-                    case '.m4a':
-                        command.audioCodec('aac').format('mp4');
-                        break;
-                    case '.mp3':
-                    default:
-                        command.audioCodec('libmp3lame').format('mp3');
-                        if (this.bitrate !== null) {
-                            command.audioBitrate(Math.floor(this.bitrate / 1000) + 'k');
-                        }
-                        break;
-                }
+    async convertAudio(inputFile, outputFile, outputOptions = {}) {
+        const args = ['-i', inputFile];
+
+        // Apply custom output options if provided
+        if (Object.keys(outputOptions).length > 0) {
+            for (const [key, value] of Object.entries(outputOptions)) {
+                args.push(`-${key}`, String(value));
             }
-            
-            command
-                .output(outputFile)
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err))
-                .run();
-        });
+        } else {
+            // Auto-detect format and apply defaults based on file extension
+            const ext = path.extname(outputFile).toLowerCase();
+            switch (ext) {
+                case '.ogg':
+                    args.push('-acodec', 'libopus', '-f', 'ogg');
+                    break;
+                case '.wav':
+                    args.push('-acodec', 'pcm_s16le', '-f', 'wav');
+                    break;
+                case '.flac':
+                    args.push('-acodec', 'flac', '-f', 'flac');
+                    break;
+                case '.aac':
+                case '.m4a':
+                    args.push('-acodec', 'aac', '-f', 'mp4');
+                    break;
+                case '.mp3':
+                default:
+                    args.push('-acodec', 'libmp3lame', '-f', 'mp3');
+                    if (this.bitrate !== null) {
+                        args.push('-b:a', Math.floor(this.bitrate / 1000) + 'k');
+                    }
+                    break;
+            }
+        }
+
+        await runFfmpeg([...args, outputFile]);
     }
 
     // Keep convertToOgg for backward compatibility
@@ -433,74 +469,38 @@ class SfxMix {
         return filename.startsWith(this.TMP_DIR);
     }
 
-    concatenateAudioFiles(inputFiles, outputFile) {
-        return new Promise((resolve, reject) => {
-            try {
-                // Use absolute paths for input files based on process.cwd()
-                const absoluteInputFiles = inputFiles.map(file => 
-                    path.isAbsolute(file) ? file : path.resolve(process.cwd(), file)
-                );
+    async concatenateAudioFiles(inputFiles, outputFile) {
+        try {
+            // Use absolute paths for input files based on process.cwd()
+            const absoluteInputFiles = inputFiles.map(file => 
+                path.isAbsolute(file) ? file : path.resolve(process.cwd(), file)
+            );
 
-                // Verify all input files exist
-                for (const file of absoluteInputFiles) {
-                    if (!fs.existsSync(file)) {
-                        throw new Error(`Input file does not exist: ${file}`);
-                    }
+            // Verify all input files exist
+            for (const file of absoluteInputFiles) {
+                if (!fs.existsSync(file)) {
+                    throw new Error(`Input file does not exist: ${file}`);
                 }
-
-                const command = ffmpeg();
-                absoluteInputFiles.forEach(file => command.input(file));
-
-                this.applyIntermediateOutput(
-                    command.complexFilter([
-                        {
-                            filter: 'concat',
-                            options: {
-                                n: absoluteInputFiles.length,
-                                v: 0,
-                                a: 1
-                            },
-                            inputs: absoluteInputFiles.map((_, index) => `${index}:a:0`),
-                            outputs: 'audio'
-                        }
-                    ], 'audio'),
-                    outputFile
-                )
-                    .on('end', () => resolve())
-                    .on('error', (ffmpegErr) => {
-                        console.error('FFmpeg concatenation error:', ffmpegErr);
-                        reject(ffmpegErr);
-                    })
-                    .run();
-
-            } catch (error) {
-                console.error('Error in concatenateAudioFiles:', error);
-                reject(error);
             }
-        });
+
+            const inputs = absoluteInputFiles.flatMap(file => ['-i', file]);
+            const concatInputs = absoluteInputFiles.map((_, index) => `[${index}:a:0]`).join('');
+            const filter = `${concatInputs}concat=n=${absoluteInputFiles.length}:v=0:a=1[audio]`;
+
+            await this.renderWav([...inputs, '-filter_complex', filter, '-map', '[audio]'], outputFile);
+        } catch (error) {
+            console.error('Error in concatenateAudioFiles:', error);
+            throw error;
+        }
     }
 
     mixAudioFiles(inputFile1, inputFile2, outputFile, options = {}) {
-        return new Promise((resolve, reject) => {
-            const durationOption = options.duration || 'longest'; // Default to 'longest'
-            const command = ffmpeg()
-                .input(inputFile1)
-                .input(inputFile2)
-                .complexFilter([
-                    {
-                        filter: 'amix',
-                        options: {
-                            inputs: 2,
-                            duration: durationOption,
-                        },
-                    },
-                ]);
-
-            this.applyIntermediateOutput(command, outputFile)
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err))
-                .run();
-        });
+        const durationOption = options.duration || 'longest'; // Default to 'longest'
+        return this.renderWav([
+            '-i', inputFile1,
+            '-i', inputFile2,
+            '-filter_complex', `amix=inputs=2:duration=${durationOption}`
+        ], outputFile);
     }
 
     /**
@@ -540,185 +540,138 @@ class SfxMix {
         });
     }
 
-    _analyzeTail(filePath, options = {}) {
-        return new Promise((resolve, reject) => {
-            const tailDuration = options.tailDuration || 50;
-            const threshold = options.threshold !== undefined ? options.threshold : -30;
-            const sampleRate = 44100;
-            const tailSamples = Math.floor((tailDuration / 1000) * sampleRate);
+    async _analyzeTail(filePath, options = {}) {
+        const tailDuration = options.tailDuration || 50;
+        const threshold = options.threshold !== undefined ? options.threshold : -30;
+        const sampleRate = 44100;
+        const tailSamples = Math.floor((tailDuration / 1000) * sampleRate);
 
-            const chunks = [];
+        const { stdout: buffer } = await runFfmpeg([
+            '-i', filePath,
+            '-ac', '1',
+            '-ar', String(sampleRate),
+            '-f', 's16le',
+            'pipe:1'
+        ]);
+        const allSamples = new Int16Array(
+            buffer.buffer,
+            buffer.byteOffset,
+            Math.floor(buffer.length / 2)
+        );
 
-            const stream = ffmpeg(filePath)
-                .audioChannels(1)
-                .audioFrequency(sampleRate)
-                .format('s16le')
-                .on('error', err => reject(err))
-                .pipe();
+        const duration = allSamples.length / sampleRate;
 
-            stream.on('data', chunk => chunks.push(chunk));
+        if (allSamples.length === 0) {
+            return {
+                truncated: false,
+                tailRmsDb: -Infinity,
+                tailPeakDb: -Infinity,
+                duration: 0,
+                threshold,
+                tailDuration
+            };
+        }
 
-            stream.on('end', () => {
-                const buffer = Buffer.concat(chunks);
-                const allSamples = new Int16Array(
-                    buffer.buffer,
-                    buffer.byteOffset,
-                    Math.floor(buffer.length / 2)
-                );
+        const startIdx = Math.max(0, allSamples.length - tailSamples);
+        const samples = allSamples.slice(startIdx);
 
-                const duration = allSamples.length / sampleRate;
+        let sumSquares = 0;
+        let peak = 0;
+        for (let i = 0; i < samples.length; i++) {
+            const normalized = samples[i] / 32768;
+            sumSquares += normalized * normalized;
+            peak = Math.max(peak, Math.abs(normalized));
+        }
 
-                if (allSamples.length === 0) {
-                    return resolve({
-                        truncated: false,
-                        tailRmsDb: -Infinity,
-                        tailPeakDb: -Infinity,
-                        duration: 0,
-                        threshold,
-                        tailDuration
-                    });
-                }
+        const rms = Math.sqrt(sumSquares / samples.length);
+        const rmsDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+        const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
 
-                const startIdx = Math.max(0, allSamples.length - tailSamples);
-                const samples = allSamples.slice(startIdx);
-
-                let sumSquares = 0;
-                let peak = 0;
-                for (let i = 0; i < samples.length; i++) {
-                    const normalized = samples[i] / 32768;
-                    sumSquares += normalized * normalized;
-                    peak = Math.max(peak, Math.abs(normalized));
-                }
-
-                const rms = Math.sqrt(sumSquares / samples.length);
-                const rmsDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
-                const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
-
-                resolve({
-                    truncated: rmsDb > threshold,
-                    tailRmsDb: Math.round(rmsDb * 100) / 100,
-                    tailPeakDb: Math.round(peakDb * 100) / 100,
-                    duration: Math.round(duration * 1000) / 1000,
-                    threshold,
-                    tailDuration
-                });
-            });
-
-            stream.on('error', err => reject(err));
-        });
+        return {
+            truncated: rmsDb > threshold,
+            tailRmsDb: Math.round(rmsDb * 100) / 100,
+            tailPeakDb: Math.round(peakDb * 100) / 100,
+            duration: Math.round(duration * 1000) / 1000,
+            threshold,
+            tailDuration
+        };
     }
 
-    getAudioInfo(inputFile) {
-        return new Promise((resolve, reject) => {
-            ffmpeg.ffprobe(inputFile, (err, metadata) => {
-                if (err) {
-                    reject(err);
+    async getAudioInfo(inputFile) {
+        const metadata = await probeAudio(inputFile);
+
+        const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+        if (!audioStream) {
+            throw new Error('No audio stream found');
+        }
+
+        return {
+            channels: audioStream.channels || 2,
+            sampleRate: Number(audioStream.sample_rate) || 44100,
+            bitrate: Number(metadata.format.bit_rate) || 128000
+        };
+    }
+
+    async generateSilence(durationMs, outputFile, audioInfo = null) {
+        const durationSec = durationMs / 1000;
+        const sampleRate = audioInfo?.sampleRate || 44100;
+        const numChannels = audioInfo?.channels || 2;
+        const bytesPerSample = 2; // 16-bit audio
+        const bytesPerSecond = sampleRate * numChannels * bytesPerSample;
+        let totalBytes = Math.floor(durationSec * bytesPerSecond);
+
+        const silenceStream = new Readable({
+            read(size) {
+                const chunkSize = Math.min(size, totalBytes);
+                if (chunkSize <= 0) {
+                    this.push(null);
                     return;
                 }
-                
-                const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
-                if (!audioStream) {
-                    reject(new Error('No audio stream found'));
-                    return;
-                }
-                
-                resolve({
-                    channels: audioStream.channels || 2,
-                    sampleRate: audioStream.sample_rate || 44100,
-                    bitrate: metadata.format.bit_rate || 128000
-                });
-            });
-        });
-    }
-
-    generateSilence(durationMs, outputFile, audioInfo = null) {
-        return new Promise((resolve, reject) => {
-            const durationSec = durationMs / 1000;
-            const sampleRate = audioInfo?.sampleRate || 44100;
-            const numChannels = audioInfo?.channels || 2;
-            const bytesPerSample = 2; // 16-bit audio
-            const bytesPerSecond = sampleRate * numChannels * bytesPerSample;
-            let totalBytes = Math.floor(durationSec * bytesPerSecond);
-
-            const silenceStream = new Readable({
-                read(size) {
-                    const chunkSize = Math.min(size, totalBytes);
-                    if (chunkSize <= 0) {
-                        this.push(null);
-                        return;
-                    }
-                    this.push(Buffer.alloc(chunkSize, 0));
-                    totalBytes -= chunkSize;
-                }
-            });
-
-            this.applyIntermediateOutput(
-                ffmpeg()
-                .input(silenceStream)
-                .inputFormat('s16le')
-                .audioChannels(numChannels)
-                    .audioFrequency(sampleRate),
-                outputFile
-            )
-                .on('end', () => {
-                    if (fs.existsSync(outputFile)) {
-                        resolve();
-                    } else {
-                        reject(new Error(`Failed to generate silence file: ${outputFile}`));
-                    }
-                })
-                .on('error', (err) => reject(err))
-                .run();
-        });
-    }
-
-    applyFilter(inputFile, filterName, options, outputFile) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                const filterChain = this.getFilterChain(filterName, options);
-                if (!filterChain) {
-                    return reject(new Error(`Unknown filter: ${filterName}`));
-                }
-
-                const command = ffmpeg()
-                    .input(inputFile)
-                    .audioFilters(filterChain);
-
-                this.applyIntermediateOutput(command, outputFile)
-                    .on('end', () => resolve())
-                    .on('error', (err) => reject(err))
-                    .run();
-            } catch (err) {
-                reject(err);
+                this.push(Buffer.alloc(chunkSize, 0));
+                totalBytes -= chunkSize;
             }
         });
+
+        // Raw PCM carries no header: rate and channels must describe the input.
+        await runFfmpeg([
+            '-f', 's16le',
+            '-ar', String(sampleRate),
+            '-ac', String(numChannels),
+            '-i', 'pipe:0',
+            '-acodec', 'pcm_s16le',
+            '-f', 'wav',
+            outputFile
+        ], silenceStream);
+
+        if (!fs.existsSync(outputFile)) {
+            throw new Error(`Failed to generate silence file: ${outputFile}`);
+        }
     }
 
-    getMaxVolume(inputFile) {
-        return new Promise((resolve, reject) => {
-            let maxVolume = null;
+    async applyFilter(inputFile, filterName, options, outputFile) {
+        const filterChain = this.getFilterChain(filterName, options);
+        if (!filterChain) {
+            throw new Error(`Unknown filter: ${filterName}`);
+        }
 
-            ffmpeg(inputFile)
-                .noVideo()
-                .audioFilters('volumedetect')
-                .format('null')
-                .output(NULL_OUTPUT)
-                .on('stderr', (line) => {
-                    const match = line.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
-                    if (match) {
-                        maxVolume = match[1] === '-inf' ? -Infinity : Number(match[1]);
-                    }
-                })
-                .on('end', () => {
-                    if (!Number.isFinite(maxVolume)) {
-                        reject(new Error(`Could not measure peak volume for ${inputFile}.`));
-                        return;
-                    }
-                    resolve(maxVolume);
-                })
-                .on('error', reject)
-                .run();
-        });
+        await this.renderWav(['-i', inputFile, '-filter:a', filterChain], outputFile);
+    }
+
+    async getMaxVolume(inputFile) {
+        const { stderr } = await runFfmpeg([
+            '-i', inputFile,
+            '-vn',
+            '-filter:a', 'volumedetect',
+            '-f', 'null',
+            NULL_OUTPUT
+        ]);
+
+        const match = stderr.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
+        const maxVolume = match && (match[1] === '-inf' ? -Infinity : Number(match[1]));
+        if (!Number.isFinite(maxVolume)) {
+            throw new Error(`Could not measure peak volume for ${inputFile}.`);
+        }
+        return maxVolume;
     }
 
     async applyPeakNormalize(inputFile, targetDb, outputFile) {
@@ -726,15 +679,7 @@ class SfxMix {
         const gainDb = targetDb - maxVolume;
         const gainFilter = `volume=${gainDb.toFixed(6)}dB`;
 
-        return new Promise((resolve, reject) => {
-            this.applyIntermediateOutput(
-                ffmpeg(inputFile).audioFilters(gainFilter),
-                outputFile
-            )
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err))
-                .run();
-        });
+        await this.renderWav(['-i', inputFile, '-filter:a', gainFilter], outputFile);
     }
 
     applyTrim(inputFile, options, outputFile) {
@@ -782,21 +727,10 @@ class SfxMix {
                 const filterChain = filters.join(',');
 
                 // Apply filters directly on input file
-                const command = ffmpeg()
-                    .input(inputFile)
-                    .audioFilters(filterChain);
-
-                this.applyIntermediateOutput(command, outputFile)
-                    .on('end', () => resolve())
-                    .on('error', (err, stdout, stderr) => {
-                        console.error('FFmpeg trim error:', err.message);
-                        if (stderr) {
-                            console.error('FFmpeg stderr:', stderr);
-                        }
-                        reject(err);
-                    })
-                    .run();
+                await this.renderWav(['-i', inputFile, '-filter:a', filterChain], outputFile);
+                resolve();
             } catch (err) {
+                console.error('FFmpeg trim error:', err.message);
                 reject(err);
             }
         });
@@ -867,17 +801,12 @@ class SfxMix {
                         );
                     }
 
-                    this.applyIntermediateOutput(
-                        ffmpeg(inputFile).audioFilters(filters),
-                        outputFile
-                    )
-                        .on('end', () => resolve())
-                        .on('error', (err) => reject(err))
-                        .run();
+                    await this.renderWav(['-i', inputFile, '-filter:a', filters.join(',')], outputFile);
+                    resolve();
                     return;
                 }
 
-                const command = ffmpeg().input(inputFile);
+                const inputs = ['-i', inputFile];
                 const filters = [];
                 const concatInputs = [];
 
@@ -888,7 +817,7 @@ class SfxMix {
                     );
                     const audioInfo = await this.getAudioInfo(inputFile);
                     await this.generateSilence(joinPadMs, silencePadFile, audioInfo);
-                    command.input(silencePadFile);
+                    inputs.push('-i', silencePadFile);
 
                     const padCount = ordered.length - 1;
                     if (padCount === 1) {
@@ -912,25 +841,14 @@ class SfxMix {
                     `${concatInputs.join('')}concat=n=${concatInputs.length}:v=0:a=1[out]`
                 );
 
-                const cleanupPad = () => {
-                    if (silencePadFile) {
-                        this.safeDeleteFile(silencePadFile);
-                    }
-                };
-
-                this.applyIntermediateOutput(
-                    command.complexFilter(filters.join(';'), 'out'),
+                await this.renderWav(
+                    [...inputs, '-filter_complex', filters.join(';'), '-map', '[out]'],
                     outputFile
-                )
-                    .on('end', () => {
-                        cleanupPad();
-                        resolve();
-                    })
-                    .on('error', (err) => {
-                        cleanupPad();
-                        reject(err);
-                    })
-                    .run();
+                );
+                if (silencePadFile) {
+                    this.safeDeleteFile(silencePadFile);
+                }
+                resolve();
             } catch (err) {
                 if (silencePadFile) {
                     this.safeDeleteFile(silencePadFile);
@@ -1006,46 +924,30 @@ class SfxMix {
                 const end = Math.min(duration, sound.end + paddingEnd / 1000);
                 const clipDuration = end - start;
 
-                const command = ffmpeg(inputFile)
-                    .audioFilters([
-                        `atrim=start=${start.toFixed(6)}:duration=${clipDuration.toFixed(6)}`,
-                        'asetpts=PTS-STARTPTS',
-                        'aresample=async=1:min_hard_comp=0.100000:first_pts=0'
-                    ]);
+                const filterChain = [
+                    `atrim=start=${start.toFixed(6)}:duration=${clipDuration.toFixed(6)}`,
+                    'asetpts=PTS-STARTPTS',
+                    'aresample=async=1:min_hard_comp=0.100000:first_pts=0'
+                ].join(',');
 
-                this.applyIntermediateOutput(command, outputFile)
-                    .on('end', () => resolve())
-                    .on('error', (err, stdout, stderr) => {
-                        console.error('FFmpeg split error:', err.message);
-                        if (stderr) {
-                            console.error('FFmpeg stderr:', stderr);
-                        }
-                        reject(err);
-                    })
-                    .run();
+                await this.renderWav(['-i', inputFile, '-filter:a', filterChain], outputFile);
+                resolve();
             } catch (err) {
+                console.error('FFmpeg split error:', err.message);
                 reject(err);
             }
         });
     }
 
-    getAudioDuration(inputFile) {
-        return new Promise((resolve, reject) => {
-            ffmpeg.ffprobe(inputFile, (err, metadata) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
+    async getAudioDuration(inputFile) {
+        const metadata = await probeAudio(inputFile);
 
-                const duration = Number(metadata.format.duration);
-                if (!Number.isFinite(duration) || duration <= 0) {
-                    reject(new Error(`Could not read duration for ${inputFile}`));
-                    return;
-                }
+        const duration = Number(metadata.format.duration);
+        if (!Number.isFinite(duration) || duration <= 0) {
+            throw new Error(`Could not read duration for ${inputFile}`);
+        }
 
-                resolve(duration);
-            });
-        });
+        return duration;
     }
 
     parseSilenceEvent(line) {
@@ -1062,27 +964,22 @@ class SfxMix {
         return null;
     }
 
-    detectSilence(inputFile, options = {}) {
-        return new Promise((resolve, reject) => {
-            const threshold = options.threshold !== undefined ? options.threshold : -35;
-            const silenceDuration = options.silenceDuration !== undefined ? options.silenceDuration : 0.03;
-            const events = [];
+    async detectSilence(inputFile, options = {}) {
+        const threshold = options.threshold !== undefined ? options.threshold : -35;
+        const silenceDuration = options.silenceDuration !== undefined ? options.silenceDuration : 0.03;
 
-            ffmpeg(inputFile)
-                .noVideo()
-                .audioFilters(`silencedetect=noise=${threshold}dB:d=${silenceDuration}`)
-                .format('null')
-                .output(NULL_OUTPUT)
-                .on('stderr', (line) => {
-                    const event = this.parseSilenceEvent(line);
-                    if (event) {
-                        events.push(event);
-                    }
-                })
-                .on('end', () => resolve(events))
-                .on('error', reject)
-                .run();
-        });
+        const { stderr } = await runFfmpeg([
+            '-i', inputFile,
+            '-vn',
+            '-filter:a', `silencedetect=noise=${threshold}dB:d=${silenceDuration}`,
+            '-f', 'null',
+            NULL_OUTPUT
+        ]);
+
+        return stderr
+            .split(/\r?\n/)
+            .map((line) => this.parseSilenceEvent(line))
+            .filter(Boolean);
     }
 
     getNonSilentSegments(silenceEvents, duration, minDuration = 0.01) {

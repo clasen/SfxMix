@@ -1,87 +1,18 @@
 const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const ffmpeg = require('fluent-ffmpeg');
 const SfxMix = require('../index');
+const { generateSineWav, getDuration, readPcmSamples, getMaxVolume } = require('./helpers');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const INPUT_3S = path.join(FIXTURES_DIR, 'input_3s.wav');
 const OUT_DIR = path.join(FIXTURES_DIR, 'out');
 
-function generateSineWav(outputFile, durationSec, frequency = 440) {
-    execFileSync('ffmpeg', [
-        '-y',
-        '-f', 'lavfi',
-        '-i', `sine=frequency=${frequency}:duration=${durationSec}`,
-        '-ar', '44100',
-        '-ac', '1',
-        outputFile
-    ], { stdio: 'ignore' });
-}
-
-function getDuration(filePath) {
-    return new Promise((resolve, reject) => {
-        ffmpeg.ffprobe(filePath, (err, metadata) => {
-            if (err) {
-                reject(err);
-                return;
-            }
-            resolve(Number(metadata.format.duration));
-        });
-    });
-}
-
-function readPcmSamples(filePath) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        ffmpeg(filePath)
-            .audioChannels(1)
-            .audioFrequency(44100)
-            .format('s16le')
-            .on('error', reject)
-            .pipe()
-            .on('data', (chunk) => chunks.push(chunk))
-            .on('end', () => {
-                const buffer = Buffer.concat(chunks);
-                resolve(new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2));
-            })
-            .on('error', reject);
-    });
-}
-
-function getMaxVolume(filePath) {
-    return new Promise((resolve, reject) => {
-        let maxVolume = null;
-
-        ffmpeg(filePath)
-            .noVideo()
-            .audioFilters('volumedetect')
-            .format('null')
-            .output(process.platform === 'win32' ? 'NUL' : '/dev/null')
-            .on('stderr', (line) => {
-                const match = line.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
-                if (match) {
-                    maxVolume = match[1] === '-inf' ? -Infinity : Number(match[1]);
-                }
-            })
-            .on('end', () => {
-                if (!Number.isFinite(maxVolume)) {
-                    reject(new Error(`Could not measure max volume for ${filePath}`));
-                    return;
-                }
-                resolve(maxVolume);
-            })
-            .on('error', reject)
-            .run();
-    });
-}
-
-before(async () => {
+before(() => {
     fs.mkdirSync(OUT_DIR, { recursive: true });
     if (!fs.existsSync(INPUT_3S)) {
-        await generateSineWav(INPUT_3S, 3);
+        generateSineWav(INPUT_3S, 3);
     }
 });
 
@@ -89,7 +20,7 @@ test('keep([{start:0,end:1}]) on 3s audio produces 1s output', async () => {
     const output = path.join(OUT_DIR, 'keep_single.wav');
     const sfx = new SfxMix();
     await sfx.add(INPUT_3S).keep([{ start: 0, end: 1 }]).save(output);
-    const duration = await getDuration(output);
+    const duration = getDuration(output);
     assert.ok(Math.abs(duration - 1) < 0.05, `expected ~1s, got ${duration}s`);
 });
 
@@ -103,7 +34,7 @@ test('three non-contiguous segments sum durations', async () => {
     const output = path.join(OUT_DIR, 'keep_three.wav');
     const sfx = new SfxMix();
     await sfx.add(INPUT_3S).keep(segments).save(output);
-    const duration = await getDuration(output);
+    const duration = getDuration(output);
     assert.ok(Math.abs(duration - expected) < 0.05, `expected ~${expected}s, got ${duration}s`);
 });
 
@@ -118,7 +49,7 @@ test('joinPadMs adds silence between segments', async () => {
     const output = path.join(OUT_DIR, 'keep_join_pad.wav');
     const sfx = new SfxMix();
     await sfx.add(INPUT_3S).keep(segments, { joinPadMs: 100 }).save(output);
-    const duration = await getDuration(output);
+    const duration = getDuration(output);
     assert.ok(Math.abs(duration - expected) < 0.06, `expected ~${expected}s, got ${duration}s`);
 });
 
@@ -127,7 +58,7 @@ test('fadeMs lowers edge samples relative to interior peak', async () => {
     const sfx = new SfxMix();
     await sfx.add(INPUT_3S).keep([{ start: 0.5, end: 2.5 }], { fadeMs: 20 }).save(output);
 
-    const samples = await readPcmSamples(output);
+    const samples = readPcmSamples(output);
     assert.ok(samples.length > 1000);
 
     const peak = (slice) => {
@@ -149,7 +80,7 @@ test('peakNormalize raises sample peak to target dB', async () => {
 
     await new SfxMix().add(INPUT_3S).peakNormalize(targetDb).save(output);
 
-    const maxVolume = await getMaxVolume(output);
+    const maxVolume = getMaxVolume(output);
     assert.ok(Math.abs(maxVolume - targetDb) < 0.2, `expected peak near ${targetDb} dB, got ${maxVolume} dB`);
 });
 
@@ -185,8 +116,8 @@ test('unordered segments match ordered result duration', async () => {
     await new SfxMix().add(INPUT_3S).keep(ordered).save(orderedOut);
     await new SfxMix().add(INPUT_3S).keep(unordered).save(unorderedOut);
 
-    const orderedDuration = await getDuration(orderedOut);
-    const unorderedDuration = await getDuration(unorderedOut);
+    const orderedDuration = getDuration(orderedOut);
+    const unorderedDuration = getDuration(unorderedOut);
     assert.ok(Math.abs(orderedDuration - unorderedDuration) < 0.02);
 });
 
@@ -195,7 +126,7 @@ test('cut removes middle range and keeps complement', async () => {
     const sfx = new SfxMix();
     await sfx.add(INPUT_3S).cut([{ start: 1, end: 2 }]).save(output);
 
-    const duration = await getDuration(output);
+    const duration = getDuration(output);
     assert.ok(Math.abs(duration - 2) < 0.05, `expected ~2s, got ${duration}s`);
 });
 
